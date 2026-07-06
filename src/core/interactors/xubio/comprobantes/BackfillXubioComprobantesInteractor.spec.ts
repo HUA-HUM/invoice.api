@@ -21,6 +21,15 @@ describe('BackfillXubioComprobantesInteractor', () => {
     expect(command.batchSize).toBe(10);
   });
 
+  it('uses three-day batch windows by default', () => {
+    const command = normalizeBackfillXubioComprobantesCommand({
+      fechaDesde: '2025-01-01',
+      fechaHasta: '2025-01-31',
+    });
+
+    expect(command.windowSizeDays).toBe(3);
+  });
+
   it('uses a larger default Xubio list limit for high-volume days', () => {
     const command = normalizeBackfillXubioComprobantesCommand({
       fechaDesde: '2025-01-01',
