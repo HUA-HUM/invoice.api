@@ -427,6 +427,7 @@ export class BackfillXubioComprobantesInteractor {
         xubioTransactionId: comprobante?.xubioTransactionId,
         numeroDocumento: comprobante?.numeroDocumento,
         tlqvCode: comprobante?.tlqvCode,
+        payloadDiagnostic: buildComprobanteFailureDiagnostic(comprobante),
         errorMessage: error instanceof Error ? error.message : 'Unknown error',
       });
     }
@@ -634,6 +635,82 @@ function formatCaeDate(value: XubioCaeExpirationDate | null): string | null {
 
   const [year, month, day] = value;
   return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+function buildComprobanteFailureDiagnostic(
+  comprobante: MadreXubioComprobante | undefined,
+): Record<string, unknown> | null {
+  if (comprobante === undefined) {
+    return null;
+  }
+
+  const productRawPayloadSizes = comprobante.productItems?.map((item) =>
+    measureJsonLength(item.rawPayload),
+  );
+  const cobranzaRawPayloadSizes = comprobante.cobranzaItems?.map((item) =>
+    measureJsonLength(item.rawPayload),
+  );
+  const percepcionRawPayloadSizes = comprobante.percepcionItems?.map((item) =>
+    measureJsonLength(item.rawPayload),
+  );
+
+  return {
+    documentKind: comprobante.documentKind ?? null,
+    letraComprobante: comprobante.letraComprobante ?? null,
+    fechaEmision: comprobante.fechaEmision,
+    fechaVencimiento: comprobante.fechaVencimiento ?? null,
+    importeGravado: comprobante.importeGravado ?? null,
+    importeImpuestos: comprobante.importeImpuestos ?? null,
+    importeTotal: comprobante.importeTotal ?? null,
+    clienteXubioId: comprobante.clienteXubioId ?? null,
+    clienteCodigo: comprobante.clienteCodigo ?? null,
+    clienteNombreLength: comprobante.clienteNombre?.length ?? null,
+    descripcionLength: comprobante.descripcion?.length ?? null,
+    caeLength: comprobante.cae?.length ?? null,
+    caeFechaVencimiento: comprobante.caeFechaVencimiento ?? null,
+    fiscalmenteEmitido: comprobante.fiscalmenteEmitido ?? null,
+    rawListPayloadLength: measureJsonLength(comprobante.rawListPayload),
+    rawDetailPayloadLength: measureJsonLength(comprobante.rawDetailPayload),
+    productItemsCount: comprobante.productItems?.length ?? 0,
+    cobranzaItemsCount: comprobante.cobranzaItems?.length ?? 0,
+    percepcionItemsCount: comprobante.percepcionItems?.length ?? 0,
+    maxProductRawPayloadLength: maxNullable(productRawPayloadSizes),
+    maxCobranzaRawPayloadLength: maxNullable(cobranzaRawPayloadSizes),
+    maxPercepcionRawPayloadLength: maxNullable(percepcionRawPayloadSizes),
+    maxProductDescripcionLength: maxNullable(
+      comprobante.productItems?.map((item) => item.descripcion?.length ?? 0),
+    ),
+    maxCobranzaDescripcionLength: maxNullable(
+      comprobante.cobranzaItems?.map((item) => item.descripcion?.length ?? 0),
+    ),
+    maxPercepcionDescripcionLength: maxNullable(
+      comprobante.percepcionItems?.map((item) => item.descripcion?.length ?? 0),
+    ),
+  };
+}
+
+function measureJsonLength(value: unknown): number | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  try {
+    return JSON.stringify(value).length;
+  } catch {
+    return null;
+  }
+}
+
+function maxNullable(values: Array<number | null> | undefined): number | null {
+  const numbers = values?.filter((value): value is number =>
+    Number.isFinite(value),
+  );
+
+  if (numbers === undefined || numbers.length === 0) {
+    return null;
+  }
+
+  return Math.max(...numbers);
 }
 
 function buildBatchWindows(
