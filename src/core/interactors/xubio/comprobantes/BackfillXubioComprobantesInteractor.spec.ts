@@ -21,6 +21,15 @@ describe('BackfillXubioComprobantesInteractor', () => {
     expect(command.batchSize).toBe(10);
   });
 
+  it('uses a larger default Xubio list limit for high-volume days', () => {
+    const command = normalizeBackfillXubioComprobantesCommand({
+      fechaDesde: '2025-01-01',
+      fechaHasta: '2025-01-31',
+    });
+
+    expect(command.xubioLimit).toBe(1000);
+  });
+
   it('gets summaries, gets details and upserts them in Madre API', async () => {
     const summary = createSummary(54231396);
     const detail = createDetail(54231396);
@@ -47,7 +56,7 @@ describe('BackfillXubioComprobantesInteractor', () => {
     expect(getByDateRangeRepository.getByDateRange).toHaveBeenCalledWith({
       fechaDesde: '2025-01-01',
       fechaHasta: '2025-01-01',
-      limit: 100,
+      limit: 1000,
     });
     expect(getDetailRepository.getDetail).toHaveBeenCalledWith({
       transaccionId: 54231396,
@@ -95,14 +104,47 @@ describe('BackfillXubioComprobantesInteractor', () => {
     expect(getByDateRangeRepository.getByDateRange).toHaveBeenNthCalledWith(1, {
       fechaDesde: '2025-01-01',
       fechaHasta: '2025-01-01',
-      limit: 100,
+      limit: 1000,
     });
     expect(getByDateRangeRepository.getByDateRange).toHaveBeenNthCalledWith(2, {
       fechaDesde: '2025-01-02',
       fechaHasta: '2025-01-02',
-      limit: 100,
+      limit: 1000,
     });
     expect(result.splitWindows).toEqual([]);
+    expect(result.saturatedWindows).toEqual([]);
+    expect(result.status).toBe('completed');
+  });
+
+  it('uses the configured Xubio list limit and marks saturated days with that threshold', async () => {
+    const getByDateRangeRepository = createGetByDateRangeRepository();
+    getByDateRangeRepository.getByDateRange.mockResolvedValue({
+      comprobantes: Array.from({ length: 250 }, (_, index) =>
+        createSummary(index + 1),
+      ),
+    });
+    const getDetailRepository = createGetDetailRepository();
+    const madreRepository = createMadreRepository();
+    const interactor = new BackfillXubioComprobantesInteractor(
+      getByDateRangeRepository,
+      getDetailRepository,
+      madreRepository,
+      () => new Date('2025-01-01T12:00:00.000Z'),
+      undefined,
+      { defaultXubioLimit: 250 },
+    );
+
+    const result = await interactor.execute({
+      fechaDesde: '2025-01-01',
+      fechaHasta: '2025-01-01',
+    });
+
+    expect(getByDateRangeRepository.getByDateRange).toHaveBeenCalledWith({
+      fechaDesde: '2025-01-01',
+      fechaHasta: '2025-01-01',
+      limit: 250,
+    });
+    expect(result.xubioLimit).toBe(250);
     expect(result.saturatedWindows).toEqual([
       {
         fechaDesde: '2025-01-01',

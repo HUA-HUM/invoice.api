@@ -25,7 +25,7 @@ describe('GetComprobantesByDateRepository', () => {
         fechaHasta: '2025-01-31',
       },
       headers: {
-        limit: 100,
+        limit: 1000,
       },
     });
     expect(result.comprobantes).toHaveLength(1);

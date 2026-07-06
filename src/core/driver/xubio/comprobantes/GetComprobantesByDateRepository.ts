@@ -15,7 +15,8 @@ import {
 
 const DEFAULT_BASE_URL = 'https://xubio.com';
 const DEFAULT_TIMEOUT_IN_MILLISECONDS = 20_000;
-const DEFAULT_LIMIT = 100;
+const DEFAULT_LIMIT = 1_000;
+const MAX_LIMIT = 10_000;
 const COMPROBANTE_VENTA_PATH = '/API/1.1/comprobanteVentaBean';
 
 export interface GetComprobantesByDateRepositoryOptions {
@@ -199,9 +200,7 @@ function validateIsoDate(value: string, field: string): void {
 }
 
 function validateLimit(value: number): void {
-  if (!Number.isInteger(value) || value < 1 || value > DEFAULT_LIMIT) {
-    throw new RangeError(
-      `limit must be an integer between 1 and ${DEFAULT_LIMIT}`,
-    );
+  if (!Number.isInteger(value) || value < 1 || value > MAX_LIMIT) {
+    throw new RangeError(`limit must be an integer between 1 and ${MAX_LIMIT}`);
   }
 }

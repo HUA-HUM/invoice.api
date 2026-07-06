@@ -42,6 +42,7 @@ export interface EnqueueXubioComprobantesBackfillResponse {
   fechaHasta: string;
   batchSize: number;
   windowSizeDays: number;
+  xubioLimit: number;
 }
 
 @Injectable()
@@ -165,6 +166,7 @@ export class XubioComprobantesBackfillQueueService implements OnModuleDestroy {
       fechaHasta: syncRun.command.fechaHasta,
       batchSize: syncRun.command.batchSize,
       windowSizeDays: syncRun.command.windowSizeDays,
+      xubioLimit: syncRun.command.xubioLimit,
     };
   }
 
@@ -182,6 +184,7 @@ export class XubioComprobantesBackfillQueueService implements OnModuleDestroy {
         syncRunId: job.data.syncRunId,
         fechaDesde: job.data.command.fechaDesde,
         fechaHasta: job.data.command.fechaHasta,
+        xubioLimit: job.data.command.xubioLimit,
       })}`,
     );
 

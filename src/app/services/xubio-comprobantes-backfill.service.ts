@@ -17,6 +17,8 @@ import {
 } from '../../core/interactors/xubio/comprobantes/BackfillXubioComprobantesInteractor';
 import type { XubioRequestRetryOptions } from '../../core/driver/xubio/XubioRequestRetry';
 
+const DEFAULT_XUBIO_COMPROBANTES_LIST_LIMIT = 1_000;
+
 export interface CreatedXubioComprobantesBackfillSyncRun {
   syncRunId: number;
   command: NormalizedBackfillXubioComprobantesCommand;
@@ -39,9 +41,11 @@ export class XubioComprobantesBackfillService {
   async createSyncRun(
     command: BackfillXubioComprobantesCommand,
   ): Promise<CreatedXubioComprobantesBackfillSyncRun> {
+    const defaultXubioLimit = this.readXubioComprobantesListLimit();
     const normalizedCommand = normalizeBackfillXubioComprobantesCommand(
       command,
       () => new Date(),
+      { defaultXubioLimit },
     );
     const madreXubioComprobantesRepository =
       this.createMadreXubioComprobantesRepository();
@@ -56,6 +60,7 @@ export class XubioComprobantesBackfillService {
         normalizedCommand.batchSize,
         normalizedCommand.windowSizeDays,
         'queued',
+        normalizedCommand.xubioLimit,
       ),
     });
 
@@ -66,6 +71,7 @@ export class XubioComprobantesBackfillService {
         fechaHasta: normalizedCommand.fechaHasta,
         batchSize: normalizedCommand.batchSize,
         windowSizeDays: normalizedCommand.windowSizeDays,
+        xubioLimit: normalizedCommand.xubioLimit,
       },
     };
   }
@@ -134,6 +140,7 @@ export class XubioComprobantesBackfillService {
         error: (message, context) =>
           this.logger.error(formatLogMessage(message, context)),
       },
+      { defaultXubioLimit: this.readXubioComprobantesListLimit() },
     );
   }
 
@@ -179,6 +186,13 @@ export class XubioComprobantesBackfillService {
         10_000,
       ),
     };
+  }
+
+  private readXubioComprobantesListLimit(): number {
+    return this.readNumberConfig(
+      'XUBIO_COMPROBANTES_LIST_LIMIT',
+      DEFAULT_XUBIO_COMPROBANTES_LIST_LIMIT,
+    );
   }
 
   private readNumberConfig(name: string, defaultValue: number): number {

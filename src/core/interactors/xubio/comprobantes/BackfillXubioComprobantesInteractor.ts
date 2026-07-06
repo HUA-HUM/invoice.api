@@ -12,9 +12,10 @@ import type {
 } from '../../../entities/xubio/comprobantes/XubioComprobante';
 
 const DEFAULT_FECHA_DESDE = '2025-01-01';
-const DEFAULT_XUBIO_LIMIT = 100;
+const DEFAULT_XUBIO_LIMIT = 1_000;
 const DEFAULT_BATCH_SIZE = 10;
 const DEFAULT_WINDOW_SIZE_DAYS = 10;
+const MAX_XUBIO_LIMIT = 10_000;
 const MAX_BATCH_SIZE = 500;
 const MAX_WINDOW_SIZE_DAYS = 31;
 
@@ -23,6 +24,7 @@ export interface BackfillXubioComprobantesCommand {
   fechaHasta?: string;
   batchSize?: number;
   windowSizeDays?: number;
+  xubioLimit?: number;
   syncRunId?: number;
 }
 
@@ -31,6 +33,7 @@ export interface NormalizedBackfillXubioComprobantesCommand {
   fechaHasta: string;
   batchSize: number;
   windowSizeDays: number;
+  xubioLimit: number;
   syncRunId?: number;
 }
 
@@ -44,6 +47,7 @@ export interface BackfillXubioComprobantesResponse {
   totalInserted: number;
   totalUpdated: number;
   totalFailed: number;
+  xubioLimit: number;
   batchWindows: DateWindow[];
   splitWindows: DateWindow[];
   saturatedWindows: DateWindow[];
@@ -61,18 +65,26 @@ const noopLogger: BackfillXubioComprobantesLogger = {
   error: () => undefined,
 };
 
+export interface NormalizeBackfillXubioComprobantesOptions {
+  defaultXubioLimit?: number;
+}
+
 export function normalizeBackfillXubioComprobantesCommand(
   command: BackfillXubioComprobantesCommand = {},
   now: () => Date = () => new Date(),
+  options: NormalizeBackfillXubioComprobantesOptions = {},
 ): NormalizedBackfillXubioComprobantesCommand {
   const fechaDesde = command.fechaDesde ?? DEFAULT_FECHA_DESDE;
   const fechaHasta = command.fechaHasta ?? formatDate(now());
   const batchSize = command.batchSize ?? DEFAULT_BATCH_SIZE;
   const windowSizeDays = command.windowSizeDays ?? DEFAULT_WINDOW_SIZE_DAYS;
+  const xubioLimit =
+    command.xubioLimit ?? options.defaultXubioLimit ?? DEFAULT_XUBIO_LIMIT;
 
   validateDateRange(fechaDesde, fechaHasta);
   validateBatchSize(batchSize);
   validateWindowSizeDays(windowSizeDays);
+  validateXubioLimit(xubioLimit);
   validateOptionalSyncRunId(command.syncRunId);
 
   return {
@@ -80,6 +92,7 @@ export function normalizeBackfillXubioComprobantesCommand(
     fechaHasta,
     batchSize,
     windowSizeDays,
+    xubioLimit,
     syncRunId: command.syncRunId,
   };
 }
@@ -88,13 +101,14 @@ export function buildSyncRunMetadata(
   batchSize: number,
   windowSizeDays: number,
   executionMode: 'blocking' | 'queued' = 'blocking',
+  xubioLimit: number = DEFAULT_XUBIO_LIMIT,
 ): Record<string, unknown> {
   return {
     strategy:
       executionMode === 'queued'
         ? 'queued_batch_windows_day_by_day'
         : 'batch_windows_day_by_day',
-    xubioLimit: DEFAULT_XUBIO_LIMIT,
+    xubioLimit,
     batchSize,
     windowSizeDays,
     executionMode,
@@ -114,20 +128,39 @@ interface Counters {
   totalFailed: number;
 }
 
+export interface BackfillXubioComprobantesInteractorOptions {
+  defaultXubioLimit?: number;
+}
+
 export class BackfillXubioComprobantesInteractor {
+  private readonly defaultXubioLimit: number;
+
   constructor(
     private readonly getComprobantesByDateRepository: IGetComprobantesByDateRepository,
     private readonly getComprobanteDetailRepository: IGetComprobanteDetailRepository,
     private readonly madreXubioComprobantesRepository: IMadreXubioComprobantesRepository,
     private readonly now: () => Date = () => new Date(),
     private readonly logger: BackfillXubioComprobantesLogger = noopLogger,
-  ) {}
+    options: BackfillXubioComprobantesInteractorOptions = {},
+  ) {
+    const defaultXubioLimit = options.defaultXubioLimit ?? DEFAULT_XUBIO_LIMIT;
+    validateXubioLimit(defaultXubioLimit);
+    this.defaultXubioLimit = defaultXubioLimit;
+  }
 
   async execute(
     command: BackfillXubioComprobantesCommand = {},
   ): Promise<BackfillXubioComprobantesResponse> {
-    const { fechaDesde, fechaHasta, batchSize, windowSizeDays, syncRunId } =
-      normalizeBackfillXubioComprobantesCommand(command, this.now);
+    const {
+      fechaDesde,
+      fechaHasta,
+      batchSize,
+      windowSizeDays,
+      xubioLimit,
+      syncRunId,
+    } = normalizeBackfillXubioComprobantesCommand(command, this.now, {
+      defaultXubioLimit: this.defaultXubioLimit,
+    });
 
     const batchWindows = buildBatchWindows(
       fechaDesde,
@@ -143,7 +176,12 @@ export class BackfillXubioComprobantesInteractor {
             fechaDesde,
             fechaHasta,
             windowType: 'custom',
-            metadata: buildSyncRunMetadata(batchSize, windowSizeDays),
+            metadata: buildSyncRunMetadata(
+              batchSize,
+              windowSizeDays,
+              'blocking',
+              xubioLimit,
+            ),
           })
         : { id: syncRunId };
 
@@ -163,6 +201,7 @@ export class BackfillXubioComprobantesInteractor {
         fechaDesde,
         fechaHasta,
         windowSizeDays,
+        xubioLimit,
         batchWindows: batchWindows.length,
       });
 
@@ -184,17 +223,21 @@ export class BackfillXubioComprobantesInteractor {
           batchWindow.fechaDesde,
           batchWindow.fechaHasta,
         )) {
-          const summaries = await this.getSummaries(dayWindow, syncRun.id);
+          const summaries = await this.getSummaries(
+            dayWindow,
+            syncRun.id,
+            xubioLimit,
+          );
           counters.totalListed += summaries.length;
 
-          if (summaries.length >= DEFAULT_XUBIO_LIMIT) {
+          if (summaries.length >= xubioLimit) {
             saturatedWindows.push(dayWindow);
             this.logger.warn('Xubio daily window reached the limit', {
               syncRunId: syncRun.id,
               fechaDesde: dayWindow.fechaDesde,
               fechaHasta: dayWindow.fechaHasta,
               totalListed: summaries.length,
-              limit: DEFAULT_XUBIO_LIMIT,
+              limit: xubioLimit,
             });
           }
 
@@ -247,6 +290,7 @@ export class BackfillXubioComprobantesInteractor {
         status,
         fechaDesde,
         fechaHasta,
+        xubioLimit,
         ...counters,
         batchWindows,
         splitWindows,
@@ -279,17 +323,19 @@ export class BackfillXubioComprobantesInteractor {
   private async getSummaries(
     window: DateWindow,
     syncRunId: number,
+    xubioLimit: number,
   ): Promise<XubioComprobanteSummary[]> {
     this.logger.info('Getting Xubio comprobantes by day', {
       syncRunId,
       fechaDesde: window.fechaDesde,
       fechaHasta: window.fechaHasta,
+      limit: xubioLimit,
     });
 
     const response = await this.getComprobantesByDateRepository.getByDateRange({
       fechaDesde: window.fechaDesde,
       fechaHasta: window.fechaHasta,
-      limit: DEFAULT_XUBIO_LIMIT,
+      limit: xubioLimit,
     });
 
     this.logger.info('Xubio comprobantes day listed', {
@@ -781,6 +827,14 @@ function validateWindowSizeDays(value: number): void {
   if (!Number.isInteger(value) || value < 1 || value > MAX_WINDOW_SIZE_DAYS) {
     throw new RangeError(
       `windowSizeDays must be an integer between 1 and ${MAX_WINDOW_SIZE_DAYS}`,
+    );
+  }
+}
+
+function validateXubioLimit(value: number): void {
+  if (!Number.isInteger(value) || value < 1 || value > MAX_XUBIO_LIMIT) {
+    throw new RangeError(
+      `xubioLimit must be an integer between 1 and ${MAX_XUBIO_LIMIT}`,
     );
   }
 }
