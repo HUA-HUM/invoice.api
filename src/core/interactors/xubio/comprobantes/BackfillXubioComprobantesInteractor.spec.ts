@@ -6,9 +6,21 @@ import type {
   XubioComprobanteSummary,
   XubioReference,
 } from '../../../entities/xubio/comprobantes/XubioComprobante';
-import { BackfillXubioComprobantesInteractor } from './BackfillXubioComprobantesInteractor';
+import {
+  BackfillXubioComprobantesInteractor,
+  normalizeBackfillXubioComprobantesCommand,
+} from './BackfillXubioComprobantesInteractor';
 
 describe('BackfillXubioComprobantesInteractor', () => {
+  it('uses a safe default batch size for Madre API payloads', () => {
+    const command = normalizeBackfillXubioComprobantesCommand({
+      fechaDesde: '2025-01-01',
+      fechaHasta: '2025-01-31',
+    });
+
+    expect(command.batchSize).toBe(10);
+  });
+
   it('gets summaries, gets details and upserts them in Madre API', async () => {
     const summary = createSummary(54231396);
     const detail = createDetail(54231396);
