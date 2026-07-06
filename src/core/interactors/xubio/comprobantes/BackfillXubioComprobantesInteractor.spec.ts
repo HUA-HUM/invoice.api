@@ -163,6 +163,61 @@ describe('BackfillXubioComprobantesInteractor', () => {
       }),
     );
   });
+
+  it('splits failed Madre API upsert batches and retries smaller chunks', async () => {
+    const summaries = [1, 2, 3, 4].map((transactionId) =>
+      createSummary(transactionId),
+    );
+    const getByDateRangeRepository = createGetByDateRangeRepository();
+    getByDateRangeRepository.getByDateRange.mockResolvedValue({
+      comprobantes: summaries,
+    });
+    const getDetailRepository = createGetDetailRepository();
+    getDetailRepository.getDetail.mockImplementation(
+      ({ transaccionId }: { transaccionId: number }) =>
+        Promise.resolve({ comprobante: createDetail(transaccionId) }),
+    );
+    const madreRepository = createMadreRepository();
+    madreRepository.upsertBatch
+      .mockRejectedValueOnce(new Error('Madre 500'))
+      .mockResolvedValueOnce({
+        received: 2,
+        inserted: 2,
+        updated: 0,
+        failed: 0,
+      })
+      .mockResolvedValueOnce({
+        received: 2,
+        inserted: 2,
+        updated: 0,
+        failed: 0,
+      });
+    const interactor = new BackfillXubioComprobantesInteractor(
+      getByDateRangeRepository,
+      getDetailRepository,
+      madreRepository,
+      () => new Date('2025-01-01T12:00:00.000Z'),
+    );
+
+    const result = await interactor.execute({
+      fechaDesde: '2025-01-01',
+      fechaHasta: '2025-01-01',
+      batchSize: 4,
+    });
+
+    expect(madreRepository.upsertBatch).toHaveBeenCalledTimes(3);
+    expect(
+      getUpsertBatchTransactionIds(madreRepository.upsertBatch, 0),
+    ).toEqual([1, 2, 3, 4]);
+    expect(
+      getUpsertBatchTransactionIds(madreRepository.upsertBatch, 1),
+    ).toEqual([1, 2]);
+    expect(
+      getUpsertBatchTransactionIds(madreRepository.upsertBatch, 2),
+    ).toEqual([3, 4]);
+    expect(result.totalInserted).toBe(4);
+    expect(result.totalFailed).toBe(0);
+  });
 });
 
 function createGetByDateRangeRepository() {
@@ -210,6 +265,18 @@ function createMadreRepository() {
     updateSyncRun: jest.Mock;
     upsertBatch: jest.Mock;
   };
+}
+
+function getUpsertBatchTransactionIds(
+  upsertBatch: jest.Mock,
+  callIndex: number,
+): number[] {
+  const calls = upsertBatch.mock.calls as unknown[][];
+  const command = calls[callIndex]?.[0] as {
+    items: Array<{ xubioTransactionId: number }>;
+  };
+
+  return command.items.map((item) => item.xubioTransactionId);
 }
 
 function createSummary(transaccionId: number): XubioComprobanteSummary {

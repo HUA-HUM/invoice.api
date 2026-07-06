@@ -400,10 +400,33 @@ export class BackfillXubioComprobantesInteractor {
         failed: response.failed ?? 0,
       });
     } catch (error: unknown) {
-      counters.totalFailed += batch.length;
+      if (batch.length > 1) {
+        const middle = Math.ceil(batch.length / 2);
+        this.logger.warn(
+          'Madre Xubio comprobantes batch upsert failed; splitting batch',
+          {
+            syncRunId,
+            batchSize: batch.length,
+            firstHalfSize: middle,
+            secondHalfSize: batch.length - middle,
+            errorMessage:
+              error instanceof Error ? error.message : 'Unknown error',
+          },
+        );
+
+        await this.upsertBatch(syncRunId, batch.slice(0, middle), counters);
+        await this.upsertBatch(syncRunId, batch.slice(middle), counters);
+        return;
+      }
+
+      const comprobante = batch[0];
+      counters.totalFailed += 1;
       this.logger.error('Madre Xubio comprobantes batch upsert failed', {
         syncRunId,
         batchSize: batch.length,
+        xubioTransactionId: comprobante?.xubioTransactionId,
+        numeroDocumento: comprobante?.numeroDocumento,
+        tlqvCode: comprobante?.tlqvCode,
         errorMessage: error instanceof Error ? error.message : 'Unknown error',
       });
     }
