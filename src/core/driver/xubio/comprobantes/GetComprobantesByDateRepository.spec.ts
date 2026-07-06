@@ -31,6 +31,19 @@ describe('GetComprobantesByDateRepository', () => {
     });
     expect(result.comprobantes).toHaveLength(1);
     expect(result.comprobantes[0]?.transaccionid).toBe(54231396);
+    expect(result.pageDiagnostics).toEqual([
+      {
+        page: 1,
+        requestedLimit: 100,
+        requestedLastTransactionId: null,
+        received: 1,
+        uniqueAdded: 1,
+        duplicated: 0,
+        firstTransactionId: 54231396,
+        lastTransactionId: 54231396,
+        shouldContinue: false,
+      },
+    ]);
   });
 
   it('uses the requested limit header', async () => {
@@ -83,6 +96,30 @@ describe('GetComprobantesByDateRepository', () => {
     expect(result.comprobantes).toHaveLength(102);
     expect(result.pages).toBe(2);
     expect(result.lastTransactionId).toBe(102);
+    expect(result.pageDiagnostics).toEqual([
+      {
+        page: 1,
+        requestedLimit: 100,
+        requestedLastTransactionId: null,
+        received: 100,
+        uniqueAdded: 100,
+        duplicated: 0,
+        firstTransactionId: 1,
+        lastTransactionId: 100,
+        shouldContinue: true,
+      },
+      {
+        page: 2,
+        requestedLimit: 100,
+        requestedLastTransactionId: 100,
+        received: 2,
+        uniqueAdded: 2,
+        duplicated: 0,
+        firstTransactionId: 101,
+        lastTransactionId: 102,
+        shouldContinue: false,
+      },
+    ]);
     expect(get).toHaveBeenNthCalledWith(
       1,
       '/API/1.1/comprobanteVentaBean',

@@ -327,6 +327,23 @@ export class BackfillXubioComprobantesInteractor {
       limit: xubioLimit,
     });
 
+    for (const pageDiagnostic of response.pageDiagnostics ?? []) {
+      this.logger.info('Xubio comprobantes page listed', {
+        syncRunId,
+        fechaDesde: window.fechaDesde,
+        fechaHasta: window.fechaHasta,
+        page: pageDiagnostic.page,
+        requestedLimit: pageDiagnostic.requestedLimit,
+        requestedLastTransactionId: pageDiagnostic.requestedLastTransactionId,
+        received: pageDiagnostic.received,
+        uniqueAdded: pageDiagnostic.uniqueAdded,
+        duplicated: pageDiagnostic.duplicated,
+        firstTransactionId: pageDiagnostic.firstTransactionId,
+        lastTransactionId: pageDiagnostic.lastTransactionId,
+        shouldContinue: pageDiagnostic.shouldContinue,
+      });
+    }
+
     this.logger.info('Xubio comprobantes day listed', {
       syncRunId,
       fechaDesde: window.fechaDesde,

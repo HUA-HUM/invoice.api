@@ -90,10 +90,23 @@ export interface GetXubioComprobantesByDateCommand {
   limit?: number;
 }
 
+export interface XubioComprobantesPageDiagnostic {
+  page: number;
+  requestedLimit: number;
+  requestedLastTransactionId: number | null;
+  received: number;
+  uniqueAdded: number;
+  duplicated: number;
+  firstTransactionId: number | null;
+  lastTransactionId: number | null;
+  shouldContinue: boolean;
+}
+
 export interface GetXubioComprobantesByDateResponse {
   comprobantes: XubioComprobanteSummary[];
   pages: number;
   lastTransactionId: number | null;
+  pageDiagnostics: XubioComprobantesPageDiagnostic[];
 }
 
 export interface GetXubioComprobanteDetailCommand {

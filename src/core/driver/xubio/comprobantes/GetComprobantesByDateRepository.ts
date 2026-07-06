@@ -3,6 +3,7 @@ import type { IGetComprobantesByDateRepository } from '../../../adapters/reposit
 import type {
   GetXubioComprobantesByDateCommand,
   GetXubioComprobantesByDateResponse,
+  XubioComprobantesPageDiagnostic,
 } from '../../../entities/xubio/comprobantes/XubioComprobante';
 import {
   parseComprobanteListItem,
@@ -72,6 +73,7 @@ export class GetComprobantesByDateRepository implements IGetComprobantesByDateRe
     try {
       const comprobantes: GetXubioComprobantesByDateResponse['comprobantes'] =
         [];
+      const pageDiagnostics: XubioComprobantesPageDiagnostic[] = [];
       const seenTransactionIds = new Set<number>();
       const seenCursorIds = new Set<number>();
       let lastTransactionId: number | undefined;
@@ -85,6 +87,7 @@ export class GetComprobantesByDateRepository implements IGetComprobantesByDateRe
           );
         }
 
+        const requestedLastTransactionId = lastTransactionId ?? null;
         const response = await executeXubioRequestWithRetry(
           async () =>
             this.httpClient.get<unknown>(COMPROBANTE_VENTA_PATH, {
@@ -116,11 +119,30 @@ export class GetComprobantesByDateRepository implements IGetComprobantesByDateRe
         const page = response.data.map((item, index) =>
           parseComprobanteListItem(item, `comprobantes[${index}]`),
         );
+        const nextTransactionId = page[page.length - 1]?.transaccionid;
+        const shouldContinue =
+          page.length >= Math.min(limit, MINIMUM_PAGE_SIZE_TO_PROBE_NEXT_PAGE);
+        let uniqueAdded = 0;
+        let duplicated = 0;
+
         if (page.length === 0) {
+          pageDiagnostics.push({
+            page: pageCount,
+            requestedLimit: limit,
+            requestedLastTransactionId,
+            received: 0,
+            uniqueAdded,
+            duplicated,
+            firstTransactionId: null,
+            lastTransactionId: null,
+            shouldContinue: false,
+          });
+
           return {
             comprobantes,
             pages: pageCount,
             lastTransactionId: lastTransactionId ?? null,
+            pageDiagnostics,
           };
         }
 
@@ -128,15 +150,30 @@ export class GetComprobantesByDateRepository implements IGetComprobantesByDateRe
           if (!seenTransactionIds.has(comprobante.transaccionid)) {
             comprobantes.push(comprobante);
             seenTransactionIds.add(comprobante.transaccionid);
+            uniqueAdded += 1;
+          } else {
+            duplicated += 1;
           }
         }
 
-        const nextTransactionId = page[page.length - 1]?.transaccionid;
+        pageDiagnostics.push({
+          page: pageCount,
+          requestedLimit: limit,
+          requestedLastTransactionId,
+          received: page.length,
+          uniqueAdded,
+          duplicated,
+          firstTransactionId: page[0]?.transaccionid ?? null,
+          lastTransactionId: nextTransactionId ?? null,
+          shouldContinue,
+        });
+
         if (nextTransactionId === undefined) {
           return {
             comprobantes,
             pages: pageCount,
             lastTransactionId: lastTransactionId ?? null,
+            pageDiagnostics,
           };
         }
         if (seenCursorIds.has(nextTransactionId)) {
@@ -148,13 +185,12 @@ export class GetComprobantesByDateRepository implements IGetComprobantesByDateRe
         seenCursorIds.add(nextTransactionId);
         lastTransactionId = nextTransactionId;
 
-        if (
-          page.length < Math.min(limit, MINIMUM_PAGE_SIZE_TO_PROBE_NEXT_PAGE)
-        ) {
+        if (!shouldContinue) {
           return {
             comprobantes,
             pages: pageCount,
             lastTransactionId,
+            pageDiagnostics,
           };
         }
       }
