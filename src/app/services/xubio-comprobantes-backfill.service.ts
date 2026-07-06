@@ -17,7 +17,7 @@ import {
 } from '../../core/interactors/xubio/comprobantes/BackfillXubioComprobantesInteractor';
 import type { XubioRequestRetryOptions } from '../../core/driver/xubio/XubioRequestRetry';
 
-const DEFAULT_XUBIO_COMPROBANTES_LIST_LIMIT = 1_000;
+const DEFAULT_XUBIO_COMPROBANTES_LIST_LIMIT = 100;
 
 export interface CreatedXubioComprobantesBackfillSyncRun {
   syncRunId: number;

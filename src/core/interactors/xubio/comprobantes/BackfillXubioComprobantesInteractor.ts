@@ -12,7 +12,7 @@ import type {
 } from '../../../entities/xubio/comprobantes/XubioComprobante';
 
 const DEFAULT_FECHA_DESDE = '2025-01-01';
-const DEFAULT_XUBIO_LIMIT = 1_000;
+const DEFAULT_XUBIO_LIMIT = 100;
 const DEFAULT_BATCH_SIZE = 10;
 const DEFAULT_WINDOW_SIZE_DAYS = 3;
 const MAX_XUBIO_LIMIT = 10_000;

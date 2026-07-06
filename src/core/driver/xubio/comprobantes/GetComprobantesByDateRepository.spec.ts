@@ -26,7 +26,7 @@ describe('GetComprobantesByDateRepository', () => {
       },
       headers: {
         minimalVersion: 'true',
-        limit: 1000,
+        limit: 100,
       },
     });
     expect(result.comprobantes).toHaveLength(1);
@@ -77,7 +77,7 @@ describe('GetComprobantesByDateRepository', () => {
     const result = await repository.getByDateRange({
       fechaDesde: '2025-01-01',
       fechaHasta: '2025-01-01',
-      limit: 1000,
+      limit: 100,
     });
 
     expect(result.comprobantes).toHaveLength(102);
@@ -89,7 +89,7 @@ describe('GetComprobantesByDateRepository', () => {
       expect.objectContaining({
         headers: {
           minimalVersion: 'true',
-          limit: 1000,
+          limit: 100,
         },
       }),
     );
@@ -99,7 +99,7 @@ describe('GetComprobantesByDateRepository', () => {
       expect.objectContaining({
         headers: {
           minimalVersion: 'true',
-          limit: 1000,
+          limit: 100,
           lastTransactionID: 100,
         },
       }),

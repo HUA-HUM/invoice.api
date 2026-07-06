@@ -30,13 +30,13 @@ describe('BackfillXubioComprobantesInteractor', () => {
     expect(command.windowSizeDays).toBe(3);
   });
 
-  it('uses a larger default Xubio list limit for high-volume days', () => {
+  it('uses the documented default Xubio list limit', () => {
     const command = normalizeBackfillXubioComprobantesCommand({
       fechaDesde: '2025-01-01',
       fechaHasta: '2025-01-31',
     });
 
-    expect(command.xubioLimit).toBe(1000);
+    expect(command.xubioLimit).toBe(100);
   });
 
   it('gets summaries, gets details and upserts them in Madre API', async () => {
@@ -65,7 +65,7 @@ describe('BackfillXubioComprobantesInteractor', () => {
     expect(getByDateRangeRepository.getByDateRange).toHaveBeenCalledWith({
       fechaDesde: '2025-01-01',
       fechaHasta: '2025-01-01',
-      limit: 1000,
+      limit: 100,
     });
     expect(getDetailRepository.getDetail).toHaveBeenCalledWith({
       transaccionId: 54231396,
@@ -113,12 +113,12 @@ describe('BackfillXubioComprobantesInteractor', () => {
     expect(getByDateRangeRepository.getByDateRange).toHaveBeenNthCalledWith(1, {
       fechaDesde: '2025-01-01',
       fechaHasta: '2025-01-01',
-      limit: 1000,
+      limit: 100,
     });
     expect(getByDateRangeRepository.getByDateRange).toHaveBeenNthCalledWith(2, {
       fechaDesde: '2025-01-02',
       fechaHasta: '2025-01-02',
-      limit: 1000,
+      limit: 100,
     });
     expect(result.splitWindows).toEqual([]);
     expect(result.saturatedWindows).toEqual([]);
