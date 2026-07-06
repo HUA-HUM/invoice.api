@@ -230,17 +230,6 @@ export class BackfillXubioComprobantesInteractor {
           );
           counters.totalListed += summaries.length;
 
-          if (summaries.length >= xubioLimit) {
-            saturatedWindows.push(dayWindow);
-            this.logger.warn('Xubio daily window reached the limit', {
-              syncRunId: syncRun.id,
-              fechaDesde: dayWindow.fechaDesde,
-              fechaHasta: dayWindow.fechaHasta,
-              totalListed: summaries.length,
-              limit: xubioLimit,
-            });
-          }
-
           await this.processSummaries(
             syncRun.id,
             summaries,
@@ -343,6 +332,8 @@ export class BackfillXubioComprobantesInteractor {
       fechaDesde: window.fechaDesde,
       fechaHasta: window.fechaHasta,
       totalListed: response.comprobantes.length,
+      pages: response.pages,
+      lastTransactionId: response.lastTransactionId,
     });
 
     return response.comprobantes;

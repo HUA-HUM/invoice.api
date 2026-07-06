@@ -86,7 +86,7 @@ describe('BackfillXubioComprobantesInteractor', () => {
     expect(result.totalInserted).toBe(1);
   });
 
-  it('processes a date range one day at a time and marks saturated days', async () => {
+  it('processes a date range one day at a time', async () => {
     const getByDateRangeRepository = createGetByDateRangeRepository();
     getByDateRangeRepository.getByDateRange
       .mockResolvedValueOnce({
@@ -125,7 +125,7 @@ describe('BackfillXubioComprobantesInteractor', () => {
     expect(result.status).toBe('completed');
   });
 
-  it('uses the configured Xubio list limit and marks saturated days with that threshold', async () => {
+  it('uses the configured Xubio list limit', async () => {
     const getByDateRangeRepository = createGetByDateRangeRepository();
     getByDateRangeRepository.getByDateRange.mockResolvedValue({
       comprobantes: Array.from({ length: 250 }, (_, index) =>
@@ -154,13 +154,8 @@ describe('BackfillXubioComprobantesInteractor', () => {
       limit: 250,
     });
     expect(result.xubioLimit).toBe(250);
-    expect(result.saturatedWindows).toEqual([
-      {
-        fechaDesde: '2025-01-01',
-        fechaHasta: '2025-01-01',
-      },
-    ]);
-    expect(result.status).toBe('partial');
+    expect(result.saturatedWindows).toEqual([]);
+    expect(result.status).toBe('completed');
   });
 
   it('updates sync progress after each batch window', async () => {

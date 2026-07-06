@@ -5,7 +5,7 @@ import type {
   GetXubioComprobantesByDateResponse,
 } from '../../../entities/xubio/comprobantes/XubioComprobante';
 import {
-  parseComprobanteSummary,
+  parseComprobanteListItem,
   XubioComprobanteInvalidResponseError,
 } from './XubioComprobanteParsers';
 import {
@@ -17,6 +17,8 @@ const DEFAULT_BASE_URL = 'https://xubio.com';
 const DEFAULT_TIMEOUT_IN_MILLISECONDS = 20_000;
 const DEFAULT_LIMIT = 1_000;
 const MAX_LIMIT = 10_000;
+const MINIMUM_PAGE_SIZE_TO_PROBE_NEXT_PAGE = 100;
+const MAX_PAGES_PER_DATE_RANGE = 1_000;
 const COMPROBANTE_VENTA_PATH = '/API/1.1/comprobanteVentaBean';
 
 export interface GetComprobantesByDateRepositoryOptions {
@@ -68,33 +70,94 @@ export class GetComprobantesByDateRepository implements IGetComprobantesByDateRe
     validateLimit(limit);
 
     try {
-      const response = await executeXubioRequestWithRetry(
-        async () =>
-          this.httpClient.get<unknown>(COMPROBANTE_VENTA_PATH, {
-            params: {
-              fechaDesde: command.fechaDesde,
-              fechaHasta: command.fechaHasta,
-            },
-            headers: {
-              ...(await this.buildAuthorizationHeaders()),
-              limit,
-            },
-          }),
-        {
-          ...this.retryOptions,
-          onAuthorizationFailure: this.onAuthorizationFailure,
-        },
-      );
+      const comprobantes: GetXubioComprobantesByDateResponse['comprobantes'] =
+        [];
+      const seenTransactionIds = new Set<number>();
+      const seenCursorIds = new Set<number>();
+      let lastTransactionId: number | undefined;
+      let pageCount = 0;
 
-      if (!Array.isArray(response.data)) {
-        throw new XubioComprobanteInvalidResponseError('body must be an array');
+      while (true) {
+        pageCount += 1;
+        if (pageCount > MAX_PAGES_PER_DATE_RANGE) {
+          throw new XubioComprobanteInvalidResponseError(
+            `pagination exceeded ${MAX_PAGES_PER_DATE_RANGE} pages`,
+          );
+        }
+
+        const response = await executeXubioRequestWithRetry(
+          async () =>
+            this.httpClient.get<unknown>(COMPROBANTE_VENTA_PATH, {
+              params: {
+                fechaDesde: command.fechaDesde,
+                fechaHasta: command.fechaHasta,
+              },
+              headers: {
+                ...(await this.buildAuthorizationHeaders()),
+                minimalVersion: 'true',
+                limit,
+                ...(lastTransactionId === undefined
+                  ? {}
+                  : { lastTransactionID: lastTransactionId }),
+              },
+            }),
+          {
+            ...this.retryOptions,
+            onAuthorizationFailure: this.onAuthorizationFailure,
+          },
+        );
+
+        if (!Array.isArray(response.data)) {
+          throw new XubioComprobanteInvalidResponseError(
+            'body must be an array',
+          );
+        }
+
+        const page = response.data.map((item, index) =>
+          parseComprobanteListItem(item, `comprobantes[${index}]`),
+        );
+        if (page.length === 0) {
+          return {
+            comprobantes,
+            pages: pageCount,
+            lastTransactionId: lastTransactionId ?? null,
+          };
+        }
+
+        for (const comprobante of page) {
+          if (!seenTransactionIds.has(comprobante.transaccionid)) {
+            comprobantes.push(comprobante);
+            seenTransactionIds.add(comprobante.transaccionid);
+          }
+        }
+
+        const nextTransactionId = page[page.length - 1]?.transaccionid;
+        if (nextTransactionId === undefined) {
+          return {
+            comprobantes,
+            pages: pageCount,
+            lastTransactionId: lastTransactionId ?? null,
+          };
+        }
+        if (seenCursorIds.has(nextTransactionId)) {
+          throw new XubioComprobanteInvalidResponseError(
+            `pagination cursor did not advance after transaction ${nextTransactionId}`,
+          );
+        }
+
+        seenCursorIds.add(nextTransactionId);
+        lastTransactionId = nextTransactionId;
+
+        if (
+          page.length < Math.min(limit, MINIMUM_PAGE_SIZE_TO_PROBE_NEXT_PAGE)
+        ) {
+          return {
+            comprobantes,
+            pages: pageCount,
+            lastTransactionId,
+          };
+        }
       }
-
-      return {
-        comprobantes: response.data.map((item, index) =>
-          parseComprobanteSummary(item, `comprobantes[${index}]`),
-        ),
-      };
     } catch (error: unknown) {
       if (error instanceof XubioComprobanteInvalidResponseError) {
         throw error;

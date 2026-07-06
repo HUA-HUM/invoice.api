@@ -66,6 +66,60 @@ export function parseComprobanteSummary(
   };
 }
 
+export function parseComprobanteListItem(
+  value: unknown,
+  path = 'comprobante',
+): XubioComprobanteSummary {
+  if (!isRecord(value)) {
+    throw new XubioComprobanteInvalidResponseError(`${path} must be an object`);
+  }
+
+  return {
+    rawPayload: value,
+    externalId: readOptionalStringLenient(value, 'externalId'),
+    numeroDocumento: readOptionalStringLenient(value, 'numeroDocumento'),
+    descripcion: readOptionalStringLenient(value, 'descripcion') ?? '',
+    fecha: readOptionalStringLenient(value, 'fecha') ?? '',
+    fechaVto: readOptionalStringLenient(value, 'fechaVto'),
+    importeGravado: readOptionalNumberLenient(value, 'importeGravado') ?? 0,
+    importeImpuestos: readOptionalNumberLenient(value, 'importeImpuestos') ?? 0,
+    importetotal: readOptionalNumberLenient(value, 'importetotal') ?? 0,
+    importeMonPrincipal: readOptionalNumberLenient(
+      value,
+      'importeMonPrincipal',
+    ),
+    moneda: parseReferenceLenient(value.moneda),
+    circuitoContable: parseReferenceLenient(value.circuitoContable),
+    cotizacion: readOptionalNumberLenient(value, 'cotizacion') ?? 0,
+    deposito: parseReferenceLenient(value.deposito),
+    condicionDePago: readOptionalNumberLenient(value, 'condicionDePago') ?? 0,
+    transaccionid: readPositiveIntegerFromAnyField(
+      value,
+      [
+        'transaccionid',
+        'transaccionId',
+        'transactionId',
+        'transactionID',
+        'id',
+        'ID',
+      ],
+      path,
+    ),
+    porcentajeComision: readOptionalNumberLenient(value, 'porcentajeComision'),
+    puntoVenta: parseReferenceLenient(value.puntoVenta),
+    facturaNoExportacion:
+      readOptionalBooleanLenient(value, 'facturaNoExportacion') ?? false,
+    cliente: parseReferenceLenient(value.cliente),
+    tipo: readOptionalNumberLenient(value, 'tipo') ?? 0,
+    mailEstado: readOptionalStringLenient(value, 'mailEstado'),
+    cbuinformada: readOptionalBooleanLenient(value, 'cbuinformada'),
+    cae: readOptionalStringLenient(value, 'cae'),
+    caefechaVto: parseOptionalCaeExpirationDateLenient(value.caefechaVto),
+    CAE: readOptionalStringLenient(value, 'CAE'),
+    provincia: parseReferenceOrNullLenient(value.provincia),
+  };
+}
+
 export function parseComprobanteDetail(value: unknown): XubioComprobanteDetail {
   if (!isRecord(value)) {
     throw new XubioComprobanteInvalidResponseError(
@@ -174,6 +228,36 @@ function parseReference(value: unknown, path: string): XubioReference {
   };
 }
 
+function parseReferenceLenient(value: unknown): XubioReference {
+  if (!isRecord(value)) {
+    return createEmptyReference();
+  }
+
+  return {
+    ID: readOptionalNumberLenient(value, 'ID') ?? 0,
+    id: readOptionalNumberLenient(value, 'id') ?? 0,
+    nombre: readOptionalStringLenient(value, 'nombre') ?? '',
+    codigo: readOptionalStringLenient(value, 'codigo') ?? '',
+  };
+}
+
+function parseReferenceOrNullLenient(value: unknown): XubioReference | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  return parseReferenceLenient(value);
+}
+
+function createEmptyReference(): XubioReference {
+  return {
+    ID: 0,
+    id: 0,
+    nombre: '',
+    codigo: '',
+  };
+}
+
 function parseOptionalCaeExpirationDate(
   value: unknown,
   path: string,
@@ -198,6 +282,30 @@ function parseOptionalCaeExpirationDate(
     throw new XubioComprobanteInvalidResponseError(
       `${path} must contain integers`,
     );
+  }
+
+  return [Number(year), Number(month), Number(day)];
+}
+
+function parseOptionalCaeExpirationDateLenient(
+  value: unknown,
+): XubioCaeExpirationDate | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (!Array.isArray(value) || value.length !== 3) {
+    return null;
+  }
+
+  const year: unknown = value[0];
+  const month: unknown = value[1];
+  const day: unknown = value[2];
+  if (
+    !Number.isInteger(year) ||
+    !Number.isInteger(month) ||
+    !Number.isInteger(day)
+  ) {
+    return null;
   }
 
   return [Number(year), Number(month), Number(day)];
@@ -260,6 +368,39 @@ function readPositiveInteger(
   return value;
 }
 
+function readPositiveIntegerFromAnyField(
+  source: Record<string, unknown>,
+  fields: string[],
+  path: string,
+): number {
+  for (const field of fields) {
+    const value = source[field];
+    const parsedValue = parsePositiveIntegerValue(value);
+    if (parsedValue !== null) {
+      return parsedValue;
+    }
+  }
+
+  throw new XubioComprobanteInvalidResponseError(
+    `${path} must include a positive transaction id`,
+  );
+}
+
+function parsePositiveIntegerValue(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isInteger(value) && value > 0) {
+    return value;
+  }
+
+  if (typeof value === 'string' && /^\d+$/.test(value)) {
+    const parsedValue = Number(value);
+    return Number.isSafeInteger(parsedValue) && parsedValue > 0
+      ? parsedValue
+      : null;
+  }
+
+  return null;
+}
+
 function readOptionalNullableNumber(
   source: Record<string, unknown>,
   field: string,
@@ -274,6 +415,22 @@ function readOptionalNullableNumber(
     );
   }
   return value;
+}
+
+function readOptionalNumberLenient(
+  source: Record<string, unknown>,
+  field: string,
+): number | null {
+  const value = source[field];
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function readOptionalStringLenient(
+  source: Record<string, unknown>,
+  field: string,
+): string | null {
+  const value = source[field];
+  return typeof value === 'string' ? value : null;
 }
 
 function readBoolean(source: Record<string, unknown>, field: string): boolean {
@@ -300,6 +457,14 @@ function readOptionalNullableBoolean(
     );
   }
   return value;
+}
+
+function readOptionalBooleanLenient(
+  source: Record<string, unknown>,
+  field: string,
+): boolean | null {
+  const value = source[field];
+  return typeof value === 'boolean' ? value : null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

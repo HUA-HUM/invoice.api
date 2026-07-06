@@ -92,6 +92,8 @@ export interface GetXubioComprobantesByDateCommand {
 
 export interface GetXubioComprobantesByDateResponse {
   comprobantes: XubioComprobanteSummary[];
+  pages: number;
+  lastTransactionId: number | null;
 }
 
 export interface GetXubioComprobanteDetailCommand {
