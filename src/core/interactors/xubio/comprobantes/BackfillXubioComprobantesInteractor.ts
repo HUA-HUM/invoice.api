@@ -701,17 +701,44 @@ function buildComprobanteFailureDiagnostic(
   );
 
   return {
+    source: comprobante.source ?? null,
+    externalIdLength: comprobante.externalId?.length ?? null,
+    numeroDocumentoLength: comprobante.numeroDocumento?.length ?? null,
+    tipoCodigo: comprobante.tipoCodigo ?? null,
+    tipoNombreLength: comprobante.tipoNombre?.length ?? null,
     documentKind: comprobante.documentKind ?? null,
     letraComprobante: comprobante.letraComprobante ?? null,
+    tlqvNumber: comprobante.tlqvNumber ?? null,
+    mlOrderId: comprobante.mlOrderId ?? null,
+    mlOrderIdLength: comprobante.mlOrderId?.length ?? null,
     fechaEmision: comprobante.fechaEmision,
     fechaVencimiento: comprobante.fechaVencimiento ?? null,
     importeGravado: comprobante.importeGravado ?? null,
     importeImpuestos: comprobante.importeImpuestos ?? null,
     importeTotal: comprobante.importeTotal ?? null,
+    monedaId: comprobante.monedaId ?? null,
+    monedaCodigoLength: comprobante.monedaCodigo?.length ?? null,
+    monedaNombreLength: comprobante.monedaNombre?.length ?? null,
+    circuitoContableId: comprobante.circuitoContableId ?? null,
+    circuitoContableCodigoLength:
+      comprobante.circuitoContableCodigo?.length ?? null,
+    circuitoContableNombreLength:
+      comprobante.circuitoContableNombre?.length ?? null,
+    depositoId: comprobante.depositoId ?? null,
+    depositoCodigoLength: comprobante.depositoCodigo?.length ?? null,
+    depositoNombreLength: comprobante.depositoNombre?.length ?? null,
+    puntoVentaId: comprobante.puntoVentaId ?? null,
+    puntoVentaCodigoLength: comprobante.puntoVentaCodigo?.length ?? null,
+    puntoVentaNombreLength: comprobante.puntoVentaNombre?.length ?? null,
     clienteXubioId: comprobante.clienteXubioId ?? null,
     clienteCodigo: comprobante.clienteCodigo ?? null,
+    clienteCodigoLength: comprobante.clienteCodigo?.length ?? null,
     clienteNombreLength: comprobante.clienteNombre?.length ?? null,
+    provinciaId: comprobante.provinciaId ?? null,
+    provinciaCodigoLength: comprobante.provinciaCodigo?.length ?? null,
+    provinciaNombreLength: comprobante.provinciaNombre?.length ?? null,
     descripcionLength: comprobante.descripcion?.length ?? null,
+    mailEstadoLength: comprobante.mailEstado?.length ?? null,
     caeLength: comprobante.cae?.length ?? null,
     caeFechaVencimiento: comprobante.caeFechaVencimiento ?? null,
     fiscalmenteEmitido: comprobante.fiscalmenteEmitido ?? null,
@@ -726,12 +753,40 @@ function buildComprobanteFailureDiagnostic(
     maxProductDescripcionLength: maxNullable(
       comprobante.productItems?.map((item) => item.descripcion?.length ?? 0),
     ),
+    maxProductCodigoLength: maxNullable(
+      comprobante.productItems?.map((item) => item.productoCodigo?.length ?? 0),
+    ),
+    maxProductNombreLength: maxNullable(
+      comprobante.productItems?.map((item) => item.productoNombre?.length ?? 0),
+    ),
+    maxProductDepositoCodigoLength: maxNullable(
+      comprobante.productItems?.map((item) => item.depositoCodigo?.length ?? 0),
+    ),
+    maxProductDepositoNombreLength: maxNullable(
+      comprobante.productItems?.map((item) => item.depositoNombre?.length ?? 0),
+    ),
     maxCobranzaDescripcionLength: maxNullable(
       comprobante.cobranzaItems?.map((item) => item.descripcion?.length ?? 0),
     ),
     maxPercepcionDescripcionLength: maxNullable(
       comprobante.percepcionItems?.map((item) => item.descripcion?.length ?? 0),
     ),
+    productItemsSummary:
+      comprobante.productItems?.map((item, index) => ({
+        lineNumber: index + 1,
+        transaccionCvItemId: item.transaccionCvItemId ?? null,
+        productoId: item.productoId ?? null,
+        productoCodigo: item.productoCodigo ?? null,
+        productoCodigoLength: item.productoCodigo?.length ?? null,
+        productoNombreLength: item.productoNombre?.length ?? null,
+        depositoId: item.depositoId ?? null,
+        depositoCodigoLength: item.depositoCodigo?.length ?? null,
+        descripcionLength: item.descripcion?.length ?? null,
+        cantidad: item.cantidad ?? null,
+        precio: item.precio ?? null,
+        importe: item.importe ?? null,
+        total: item.total ?? null,
+      })) ?? [],
   };
 }
 
