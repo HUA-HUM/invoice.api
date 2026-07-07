@@ -1,17 +1,12 @@
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import {
-  Job,
-  Queue,
-  Worker,
-  type ConnectionOptions,
-  type JobsOptions,
-} from 'bullmq';
+import { Job, Queue, Worker, type JobsOptions } from 'bullmq';
 import type {
   BackfillXubioComprobantesCommand,
   BackfillXubioComprobantesResponse,
   NormalizedBackfillXubioComprobantesCommand,
 } from '../../core/interactors/xubio/comprobantes/BackfillXubioComprobantesInteractor';
+import { RedisConnectionOptionsFactory } from './redis/redis-connection-options.factory';
 import { XubioComprobantesBackfillService } from './xubio-comprobantes-backfill.service';
 
 export const XUBIO_COMPROBANTES_BACKFILL_QUEUE_NAME =
@@ -59,8 +54,9 @@ export class XubioComprobantesBackfillQueueService implements OnModuleDestroy {
   constructor(
     private readonly configService: ConfigService,
     private readonly backfillService: XubioComprobantesBackfillService,
+    private readonly redisConnectionOptionsFactory: RedisConnectionOptionsFactory,
   ) {
-    const connection = this.buildRedisConnection();
+    const connection = this.redisConnectionOptionsFactory.build();
     const defaultJobOptions = this.buildDefaultJobOptions();
 
     this.queue = new Queue<XubioComprobantesBackfillJobData>(
@@ -201,29 +197,6 @@ export class XubioComprobantesBackfillQueueService implements OnModuleDestroy {
       totalInserted: result.totalInserted,
       totalUpdated: result.totalUpdated,
       totalFailed: result.totalFailed,
-    };
-  }
-
-  private buildRedisConnection(): ConnectionOptions {
-    const redisUrl = this.readOptionalConfig('REDIS_URL');
-    if (redisUrl !== undefined) {
-      return {
-        url: redisUrl,
-        maxRetriesPerRequest: null,
-      };
-    }
-
-    const username = this.readOptionalConfig('REDIS_USERNAME');
-    const password = this.readOptionalConfig('REDIS_PASSWORD');
-
-    return {
-      host: this.readOptionalConfig('REDIS_HOST') ?? '127.0.0.1',
-      port: this.readNumberConfig('REDIS_PORT', 6379),
-      db: this.readNumberConfig('REDIS_DB', 0),
-      username,
-      password,
-      tls: this.readBooleanConfig('REDIS_TLS', false) ? {} : undefined,
-      maxRetriesPerRequest: null,
     };
   }
 

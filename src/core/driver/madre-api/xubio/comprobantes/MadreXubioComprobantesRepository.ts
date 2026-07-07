@@ -143,7 +143,7 @@ export class MadreXubioComprobantesRepository implements IMadreXubioComprobantes
 
     try {
       const response = await this.httpClient.post<unknown>(
-        `${BASE_PATH}/search/by-tlqv-codes`,
+        `${BASE_PATH}/by-tlqv-codes`,
         command,
         {
           headers: this.buildHeaders(),

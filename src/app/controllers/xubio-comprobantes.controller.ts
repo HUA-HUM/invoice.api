@@ -16,6 +16,11 @@ import {
   EnqueueXubioComprobantesBackfillResponse,
   XubioComprobantesBackfillQueueService,
 } from '../services/xubio-comprobantes-backfill-queue.service';
+import {
+  EnqueueStockBueTlqvCacheRefreshResponse,
+  StockBueTlqvCacheRefreshQueueService,
+} from '../services/stock-bue-tlqv-cache-refresh-queue.service';
+import { StockBueTlqvCacheRefreshService } from '../services/stock-bue-tlqv-cache-refresh.service';
 import { StockBueTlqvAuditService } from '../services/stock-bue-tlqv-audit.service';
 import { XubioComprobantesBackfillService } from '../services/xubio-comprobantes-backfill.service';
 
@@ -26,6 +31,8 @@ export class XubioComprobantesController {
     private readonly backfillService: XubioComprobantesBackfillService,
     private readonly backfillQueueService: XubioComprobantesBackfillQueueService,
     private readonly stockBueTlqvAuditService: StockBueTlqvAuditService,
+    private readonly stockBueTlqvCacheRefreshService: StockBueTlqvCacheRefreshService,
+    private readonly stockBueTlqvCacheRefreshQueueService: StockBueTlqvCacheRefreshQueueService,
   ) {}
 
   @Post('backfill')
@@ -40,6 +47,22 @@ export class XubioComprobantesController {
     @Body() body: BackfillXubioComprobantesCommand = {},
   ): Promise<BackfillXubioComprobantesResponse> {
     return this.backfillService.execute(body);
+  }
+
+  @Post('stock-bue/tlqv-cache/refresh')
+  refreshStockBueTlqvCache(
+    @Body() body: { pageSize?: number } = {},
+  ): Promise<EnqueueStockBueTlqvCacheRefreshResponse> {
+    return this.stockBueTlqvCacheRefreshQueueService.enqueueManual({
+      pageSize: body.pageSize,
+    });
+  }
+
+  @Post('stock-bue/tlqv-cache/refresh/run-now')
+  runStockBueTlqvCacheRefreshNow(@Body() body: { pageSize?: number } = {}) {
+    return this.stockBueTlqvCacheRefreshService.execute({
+      pageSize: body.pageSize,
+    });
   }
 
   @Get('stock-bue/unbilled-dispatched-tlqv')

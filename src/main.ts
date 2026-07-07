@@ -4,6 +4,7 @@ import { ExpressAdapter as BullBoardExpressAdapter } from '@bull-board/express';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app/modules/app.module';
+import { StockBueTlqvCacheRefreshQueueService } from './app/services/stock-bue-tlqv-cache-refresh-queue.service';
 import { XubioComprobantesBackfillQueueService } from './app/services/xubio-comprobantes-backfill-queue.service';
 
 async function bootstrap() {
@@ -16,10 +17,16 @@ async function bootstrap() {
       '/admin/queues';
     const serverAdapter = new BullBoardExpressAdapter();
     const backfillQueueService = app.get(XubioComprobantesBackfillQueueService);
+    const stockBueTlqvCacheRefreshQueueService = app.get(
+      StockBueTlqvCacheRefreshQueueService,
+    );
 
     serverAdapter.setBasePath(basePath);
     createBullBoard({
-      queues: [new BullMQAdapter(backfillQueueService.getQueue())],
+      queues: [
+        new BullMQAdapter(backfillQueueService.getQueue()),
+        new BullMQAdapter(stockBueTlqvCacheRefreshQueueService.getQueue()),
+      ],
       serverAdapter,
     });
     app.use(basePath, serverAdapter.getRouter());
