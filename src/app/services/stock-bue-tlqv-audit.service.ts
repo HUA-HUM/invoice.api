@@ -1,19 +1,27 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import type Redis from 'ioredis';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { MadreXubioComprobantesRepository } from '../../core/driver/madre-api/xubio/comprobantes/MadreXubioComprobantesRepository';
-import { GetAllStockBueItemsRepository } from '../../core/driver/spreadsheet-api/stock-bue/GetAllStockBueItemsRepository';
-import { GetOneStockBueItemsRepository } from '../../core/driver/spreadsheet-api/stock-bue/GetOneStockBueItemsRepository';
+import { RedisStockBueTlqvCacheRepository } from '../../core/driver/redis/stock-bue/RedisStockBueTlqvCacheRepository';
 import {
   FindUnbilledDispatchedStockBueTlqvInteractor,
   type FindUnbilledDispatchedStockBueTlqvCommand,
   type FindUnbilledDispatchedStockBueTlqvResponse,
 } from '../../core/interactors/stock-bue/FindUnbilledDispatchedStockBueTlqvInteractor';
+import { RedisConnectionOptionsFactory } from './redis/redis-connection-options.factory';
 
 @Injectable()
-export class StockBueTlqvAuditService {
-  constructor(private readonly configService: ConfigService) {}
+export class StockBueTlqvAuditService implements OnModuleDestroy {
+  private readonly redisClient: Redis;
+
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly redisConnectionOptionsFactory: RedisConnectionOptionsFactory,
+  ) {
+    this.redisClient = this.redisConnectionOptionsFactory.createClient();
+  }
 
   execute(
     command: FindUnbilledDispatchedStockBueTlqvCommand,
@@ -21,13 +29,15 @@ export class StockBueTlqvAuditService {
     return this.createInteractor().execute(command);
   }
 
+  async onModuleDestroy(): Promise<void> {
+    await this.redisClient.quit();
+  }
+
   private createInteractor(): FindUnbilledDispatchedStockBueTlqvInteractor {
-    const getOneStockBueItemsRepository = new GetOneStockBueItemsRepository({
-      baseUrl: this.readOptionalConfig('SPREADSHEET_API_BASE_URL'),
+    const stockBueTlqvCacheRepository = new RedisStockBueTlqvCacheRepository({
+      redisClient: this.redisClient,
+      keyPrefix: this.readOptionalConfig('STOCK_BUE_TLQV_CACHE_KEY_PREFIX'),
     });
-    const getAllStockBueItemsRepository = new GetAllStockBueItemsRepository(
-      getOneStockBueItemsRepository,
-    );
     const madreXubioComprobantesRepository =
       new MadreXubioComprobantesRepository({
         baseUrl: this.readRequiredConfig('MADRE_API_BASE_URL'),
@@ -35,7 +45,7 @@ export class StockBueTlqvAuditService {
       });
 
     return new FindUnbilledDispatchedStockBueTlqvInteractor(
-      getAllStockBueItemsRepository,
+      stockBueTlqvCacheRepository,
       madreXubioComprobantesRepository,
     );
   }

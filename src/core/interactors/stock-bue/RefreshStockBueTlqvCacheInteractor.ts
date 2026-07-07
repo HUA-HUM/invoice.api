@@ -4,7 +4,10 @@ import type {
   StockBueTlqvCacheItem,
   StockBueTlqvCacheMetadata,
 } from '../../entities/cache/stock-bue/StockBueTlqvCache';
-import type { StockBueItem } from '../../entities/spreadsheet-api/stock-bue/StockBueItems';
+import {
+  STOCK_BUE_DISPATCHED_INSTRUCTION,
+  type StockBueItem,
+} from '../../entities/spreadsheet-api/stock-bue/StockBueItems';
 import { normalizeTlqvCode } from './FindUnbilledDispatchedStockBueTlqvInteractor';
 
 const DEFAULT_PAGE_SIZE = 100;
@@ -20,6 +23,10 @@ export interface RefreshStockBueTlqvCacheResponse {
   totalRowsWithTlqv: number;
   totalRowsWithoutTlqv: number;
   totalUniqueTlqv: number;
+  totalDispatchedRows: number;
+  totalDispatchedRowsWithTlqv: number;
+  totalDispatchedRowsWithoutTlqv: number;
+  totalUniqueDispatchedTlqv: number;
   instructionCounts: Record<string, number>;
 }
 
@@ -41,15 +48,32 @@ export class RefreshStockBueTlqvCacheInteractor {
     });
     const itemsByTlqvCode = new Map<string, StockBueTlqvCacheItem>();
     let totalRowsWithTlqv = 0;
+    let totalDispatchedRows = 0;
+    let totalDispatchedRowsWithTlqv = 0;
 
     for (const row of stockBue.rows) {
+      const instruction = normalizeInstruction(row.data.Instruccion);
+      const isDispatched = instruction === STOCK_BUE_DISPATCHED_INSTRUCTION;
+      if (isDispatched) {
+        totalDispatchedRows += 1;
+      }
+
       const tlqvCode = normalizeTlqvCode(row.data.TLQV);
       if (tlqvCode === undefined) {
         continue;
       }
 
       totalRowsWithTlqv += 1;
-      if (!itemsByTlqvCode.has(tlqvCode)) {
+      if (isDispatched) {
+        totalDispatchedRowsWithTlqv += 1;
+      }
+
+      const currentItem = itemsByTlqvCode.get(tlqvCode);
+      if (
+        currentItem === undefined ||
+        (currentItem.instruction !== STOCK_BUE_DISPATCHED_INSTRUCTION &&
+          isDispatched)
+      ) {
         itemsByTlqvCode.set(tlqvCode, toCacheItem(tlqvCode, row));
       }
     }
@@ -61,6 +85,11 @@ export class RefreshStockBueTlqvCacheInteractor {
       totalRowsWithTlqv,
       totalRowsWithoutTlqv: stockBue.totalRows - totalRowsWithTlqv,
       totalUniqueTlqv: items.length,
+      totalDispatchedRows,
+      totalDispatchedRowsWithTlqv,
+      totalDispatchedRowsWithoutTlqv:
+        totalDispatchedRows - totalDispatchedRowsWithTlqv,
+      totalUniqueDispatchedTlqv: countDispatchedItems(items),
       instructionCounts: countInstructions(items),
     };
 
@@ -74,6 +103,12 @@ export class RefreshStockBueTlqvCacheInteractor {
       ...metadata,
     };
   }
+}
+
+function countDispatchedItems(items: StockBueTlqvCacheItem[]): number {
+  return items.filter(
+    (item) => item.instruction === STOCK_BUE_DISPATCHED_INSTRUCTION,
+  ).length;
 }
 
 function toCacheItem(
@@ -110,6 +145,10 @@ function countInstructions(
 function normalizeText(value: string | undefined): string | undefined {
   const normalized = value?.trim();
   return normalized === '' ? undefined : normalized;
+}
+
+function normalizeInstruction(value: string | undefined): string | undefined {
+  return normalizeText(value)?.toUpperCase();
 }
 
 function validatePositiveInteger(value: number, field: string): void {

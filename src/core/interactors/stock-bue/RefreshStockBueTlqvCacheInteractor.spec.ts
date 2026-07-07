@@ -82,6 +82,10 @@ describe('RefreshStockBueTlqvCacheInteractor', () => {
         totalRowsWithTlqv: 3,
         totalRowsWithoutTlqv: 1,
         totalUniqueTlqv: 2,
+        totalDispatchedRows: 2,
+        totalDispatchedRowsWithTlqv: 1,
+        totalDispatchedRowsWithoutTlqv: 1,
+        totalUniqueDispatchedTlqv: 1,
         instructionCounts: {
           DESPACHADA: 1,
           PENDIENTE: 1,
@@ -95,6 +99,10 @@ describe('RefreshStockBueTlqvCacheInteractor', () => {
       totalRowsWithTlqv: 3,
       totalRowsWithoutTlqv: 1,
       totalUniqueTlqv: 2,
+      totalDispatchedRows: 2,
+      totalDispatchedRowsWithTlqv: 1,
+      totalDispatchedRowsWithoutTlqv: 1,
+      totalUniqueDispatchedTlqv: 1,
       instructionCounts: {
         DESPACHADA: 1,
         PENDIENTE: 1,

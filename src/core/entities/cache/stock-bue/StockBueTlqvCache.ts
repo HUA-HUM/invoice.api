@@ -24,6 +24,10 @@ export interface StockBueTlqvCacheMetadata {
   totalRowsWithTlqv: number;
   totalRowsWithoutTlqv: number;
   totalUniqueTlqv: number;
+  totalDispatchedRows: number;
+  totalDispatchedRowsWithTlqv: number;
+  totalDispatchedRowsWithoutTlqv: number;
+  totalUniqueDispatchedTlqv: number;
   instructionCounts: Record<string, number>;
 }
 

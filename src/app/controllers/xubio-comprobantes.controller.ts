@@ -67,11 +67,9 @@ export class XubioComprobantesController {
 
   @Get('stock-bue/unbilled-dispatched-tlqv')
   findUnbilledDispatchedStockBueTlqv(
-    @Query('pageSize') pageSize?: string,
     @Query('comprobantesBatchSize') comprobantesBatchSize?: string,
   ) {
     return this.stockBueTlqvAuditService.execute({
-      pageSize: parseOptionalPositiveInteger(pageSize, 'pageSize'),
       comprobantesBatchSize: parseOptionalPositiveInteger(
         comprobantesBatchSize,
         'comprobantesBatchSize',

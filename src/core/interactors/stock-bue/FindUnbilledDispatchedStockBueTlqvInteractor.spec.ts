@@ -1,67 +1,70 @@
+import type { IStockBueTlqvCacheRepository } from '../../adapters/repositories/cache/stock-bue/IStockBueTlqvCacheRepository';
 import type { IMadreXubioComprobantesRepository } from '../../adapters/repositories/madre-api/xubio/comprobantes/IMadreXubioComprobantesRepository';
-import type { IGetAllStockBueItemsRepository } from '../../adapters/repositories/spreadsheet-api/stock-bue/IGetAllStockBueItemsRepository';
-import { FindUnbilledDispatchedStockBueTlqvInteractor } from './FindUnbilledDispatchedStockBueTlqvInteractor';
+import type { StockBueTlqvCacheSnapshot } from '../../entities/cache/stock-bue/StockBueTlqvCache';
+import {
+  FindUnbilledDispatchedStockBueTlqvInteractor,
+  StockBueTlqvCacheNotReadyError,
+} from './FindUnbilledDispatchedStockBueTlqvInteractor';
 
 describe('FindUnbilledDispatchedStockBueTlqvInteractor', () => {
-  it('returns dispatched stock-bue TLQV codes that are not in comprobantes', async () => {
-    const stockBueRepository = createStockBueRepository();
-    stockBueRepository.getAll.mockResolvedValue({
-      pageSize: 100,
-      totalRows: 5,
-      totalPages: 1,
-      rows: [
-        {
-          rowNumber: 2,
-          data: {
-            TLQV: 'TLQV-1',
-            'N venta': '200001',
-            Descripción: 'Facturado',
-            Instruccion: 'DESPACHADA',
+  it('returns dispatched cached TLQV codes that are not billed in comprobantes', async () => {
+    const cacheRepository = createCacheRepository();
+    cacheRepository.getSnapshot.mockResolvedValue(
+      createSnapshot({
+        items: [
+          {
+            tlqvCode: 'TLQV-1',
+            rowNumber: 2,
+            instruction: 'DESPACHADA',
+            saleNumber: '200001',
+            description: 'Facturado',
+            rawData: {
+              TLQV: 'TLQV-1',
+              'N venta': '200001',
+              Descripción: 'Facturado',
+              Instruccion: 'DESPACHADA',
+            },
           },
-        },
-        {
-          rowNumber: 3,
-          data: {
-            TLQV: 'TLQV-2',
-            Descripción: 'No despachado',
-            Instruccion: 'PENDIENTE',
+          {
+            tlqvCode: 'TLQV-2',
+            rowNumber: 3,
+            instruction: 'PENDIENTE',
+            description: 'No despachado',
+            rawData: {
+              TLQV: 'TLQV-2',
+              Descripción: 'No despachado',
+              Instruccion: 'PENDIENTE',
+            },
           },
-        },
-        {
-          rowNumber: 4,
-          data: {
-            TLQV: ' tlqv-3 ',
-            'N venta': '200003',
-            Descripción: 'No facturado',
-            Instruccion: ' despachada ',
-            'Fecha recepcion': '26-12-24',
+          {
+            tlqvCode: 'TLQV-3',
+            rowNumber: 4,
+            instruction: 'DESPACHADA',
+            saleNumber: '200003',
+            description: 'No facturado',
+            fechaRecepcion: '26-12-24',
+            rawData: {
+              TLQV: ' tlqv-3 ',
+              'N venta': '200003',
+              Descripción: 'No facturado',
+              Instruccion: ' despachada ',
+              'Fecha recepcion': '26-12-24',
+            },
           },
-        },
-        {
-          rowNumber: 5,
-          data: {
-            TLQV: 'TLQV-1',
-            Descripción: 'Duplicado',
-            Instruccion: 'DESPACHADA',
-          },
-        },
-        {
-          rowNumber: 6,
-          data: {
-            TLQV: '',
-            Instruccion: 'DESPACHADA',
-          },
-        },
-      ],
-    });
+        ],
+      }),
+    );
 
     const comprobantesRepository = createComprobantesRepository();
     comprobantesRepository.findByTlqvCodes.mockResolvedValue({
-      items: [{ tlqvCode: 'TLQV-1' }],
+      items: [
+        { tlqvCode: 'TLQV-1', documentKind: 'INVOICE' },
+        { tlqvCode: 'TLQV-3', documentKind: 'CREDIT_NOTE' },
+      ],
     });
 
     const interactor = new FindUnbilledDispatchedStockBueTlqvInteractor(
-      stockBueRepository,
+      cacheRepository,
       comprobantesRepository,
     );
 
@@ -73,6 +76,8 @@ describe('FindUnbilledDispatchedStockBueTlqvInteractor', () => {
     expect(result).toMatchObject({
       status: 'completed',
       instruction: 'DESPACHADA',
+      cacheRefreshedAt: '2026-07-07T12:00:00.000Z',
+      totalCacheTlqv: 3,
       totalSheetRows: 5,
       totalDispatchedRows: 4,
       totalDispatchedRowsWithoutTlqv: 1,
@@ -93,23 +98,27 @@ describe('FindUnbilledDispatchedStockBueTlqvInteractor', () => {
   });
 
   it('queries comprobantes in batches', async () => {
-    const stockBueRepository = createStockBueRepository();
-    stockBueRepository.getAll.mockResolvedValue({
-      pageSize: 100,
-      totalRows: 3,
-      totalPages: 1,
-      rows: [
-        { rowNumber: 2, data: { TLQV: 'TLQV-1', Instruccion: 'DESPACHADA' } },
-        { rowNumber: 3, data: { TLQV: 'TLQV-2', Instruccion: 'DESPACHADA' } },
-        { rowNumber: 4, data: { TLQV: 'TLQV-3', Instruccion: 'DESPACHADA' } },
-      ],
-    });
+    const cacheRepository = createCacheRepository();
+    cacheRepository.getSnapshot.mockResolvedValue(
+      createSnapshot({
+        items: [
+          createDispatchedCacheItem('TLQV-1', 2),
+          createDispatchedCacheItem('TLQV-2', 3),
+          createDispatchedCacheItem('TLQV-3', 4),
+        ],
+        totalSheetRows: 3,
+        totalDispatchedRows: 3,
+        totalDispatchedRowsWithTlqv: 3,
+        totalDispatchedRowsWithoutTlqv: 0,
+        totalUniqueDispatchedTlqv: 3,
+      }),
+    );
 
     const comprobantesRepository = createComprobantesRepository();
     comprobantesRepository.findByTlqvCodes.mockResolvedValue({ items: [] });
 
     const interactor = new FindUnbilledDispatchedStockBueTlqvInteractor(
-      stockBueRepository,
+      cacheRepository,
       comprobantesRepository,
     );
 
@@ -122,13 +131,31 @@ describe('FindUnbilledDispatchedStockBueTlqvInteractor', () => {
       tlqvCodes: ['TLQV-3'],
     });
   });
+
+  it('fails clearly when the cache was not refreshed yet', async () => {
+    const cacheRepository = createCacheRepository();
+    cacheRepository.getSnapshot.mockResolvedValue({
+      items: [],
+    });
+    const comprobantesRepository = createComprobantesRepository();
+    const interactor = new FindUnbilledDispatchedStockBueTlqvInteractor(
+      cacheRepository,
+      comprobantesRepository,
+    );
+
+    await expect(interactor.execute()).rejects.toBeInstanceOf(
+      StockBueTlqvCacheNotReadyError,
+    );
+    expect(comprobantesRepository.findByTlqvCodes).not.toHaveBeenCalled();
+  });
 });
 
-function createStockBueRepository(): IGetAllStockBueItemsRepository & {
-  getAll: jest.Mock;
+function createCacheRepository(): IStockBueTlqvCacheRepository & {
+  getSnapshot: jest.Mock;
 } {
   return {
-    getAll: jest.fn(),
+    replaceAll: jest.fn(),
+    getSnapshot: jest.fn(),
   };
 }
 
@@ -140,5 +167,49 @@ function createComprobantesRepository(): IMadreXubioComprobantesRepository & {
     updateSyncRun: jest.fn(),
     upsertBatch: jest.fn(),
     findByTlqvCodes: jest.fn(),
+  };
+}
+
+function createSnapshot(
+  overrides: Partial<StockBueTlqvCacheSnapshot> & {
+    totalSheetRows?: number;
+    totalDispatchedRows?: number;
+    totalDispatchedRowsWithTlqv?: number;
+    totalDispatchedRowsWithoutTlqv?: number;
+    totalUniqueDispatchedTlqv?: number;
+  } = {},
+): StockBueTlqvCacheSnapshot {
+  const items = overrides.items ?? [];
+
+  return {
+    metadata: {
+      refreshedAt: '2026-07-07T12:00:00.000Z',
+      totalSheetRows: overrides.totalSheetRows ?? 5,
+      totalRowsWithTlqv: items.length,
+      totalRowsWithoutTlqv: 0,
+      totalUniqueTlqv: items.length,
+      totalDispatchedRows: overrides.totalDispatchedRows ?? 4,
+      totalDispatchedRowsWithTlqv: overrides.totalDispatchedRowsWithTlqv ?? 3,
+      totalDispatchedRowsWithoutTlqv:
+        overrides.totalDispatchedRowsWithoutTlqv ?? 1,
+      totalUniqueDispatchedTlqv: overrides.totalUniqueDispatchedTlqv ?? 2,
+      instructionCounts: {
+        DESPACHADA: items.filter((item) => item.instruction === 'DESPACHADA')
+          .length,
+      },
+    },
+    items,
+  };
+}
+
+function createDispatchedCacheItem(tlqvCode: string, rowNumber: number) {
+  return {
+    tlqvCode,
+    rowNumber,
+    instruction: 'DESPACHADA',
+    rawData: {
+      TLQV: tlqvCode,
+      Instruccion: 'DESPACHADA',
+    },
   };
 }

@@ -1,16 +1,14 @@
 import type { IMadreXubioComprobantesRepository } from '../../adapters/repositories/madre-api/xubio/comprobantes/IMadreXubioComprobantesRepository';
-import type { IGetAllStockBueItemsRepository } from '../../adapters/repositories/spreadsheet-api/stock-bue/IGetAllStockBueItemsRepository';
+import type { IStockBueTlqvCacheRepository } from '../../adapters/repositories/cache/stock-bue/IStockBueTlqvCacheRepository';
+import type { StockBueTlqvCacheItem } from '../../entities/cache/stock-bue/StockBueTlqvCache';
 import {
   STOCK_BUE_DISPATCHED_INSTRUCTION,
-  type StockBueItem,
   type StockBueItemData,
 } from '../../entities/spreadsheet-api/stock-bue/StockBueItems';
 
-const DEFAULT_PAGE_SIZE = 100;
 const DEFAULT_COMPROBANTES_BATCH_SIZE = 500;
 
 export interface FindUnbilledDispatchedStockBueTlqvCommand {
-  pageSize?: number;
   comprobantesBatchSize?: number;
 }
 
@@ -30,6 +28,8 @@ export interface UnbilledDispatchedStockBueTlqvItem {
 export interface FindUnbilledDispatchedStockBueTlqvResponse {
   status: 'completed';
   instruction: typeof STOCK_BUE_DISPATCHED_INSTRUCTION;
+  cacheRefreshedAt: string;
+  totalCacheTlqv: number;
   totalSheetRows: number;
   totalDispatchedRows: number;
   totalDispatchedRowsWithoutTlqv: number;
@@ -39,27 +39,33 @@ export interface FindUnbilledDispatchedStockBueTlqvResponse {
   items: UnbilledDispatchedStockBueTlqvItem[];
 }
 
+export class StockBueTlqvCacheNotReadyError extends Error {
+  constructor() {
+    super('Stock BUE TLQV cache is not ready. Refresh the cache first.');
+    this.name = StockBueTlqvCacheNotReadyError.name;
+  }
+}
+
 export class FindUnbilledDispatchedStockBueTlqvInteractor {
   constructor(
-    private readonly getAllStockBueItemsRepository: IGetAllStockBueItemsRepository,
+    private readonly stockBueTlqvCacheRepository: IStockBueTlqvCacheRepository,
     private readonly madreXubioComprobantesRepository: IMadreXubioComprobantesRepository,
   ) {}
 
   async execute(
     command: FindUnbilledDispatchedStockBueTlqvCommand = {},
   ): Promise<FindUnbilledDispatchedStockBueTlqvResponse> {
-    const pageSize = command.pageSize ?? DEFAULT_PAGE_SIZE;
     const comprobantesBatchSize =
       command.comprobantesBatchSize ?? DEFAULT_COMPROBANTES_BATCH_SIZE;
-    validatePositiveInteger(pageSize, 'pageSize');
     validatePositiveInteger(comprobantesBatchSize, 'comprobantesBatchSize');
 
-    const stockBue = await this.getAllStockBueItemsRepository.getAll({
-      pageSize,
-    });
-    const dispatchedRows = stockBue.rows.filter(isDispatchedRow);
-    const rowsByTlqvCode = groupFirstRowByTlqvCode(dispatchedRows);
-    const tlqvCodes = [...rowsByTlqvCode.keys()];
+    const snapshot = await this.stockBueTlqvCacheRepository.getSnapshot();
+    if (snapshot.metadata === undefined) {
+      throw new StockBueTlqvCacheNotReadyError();
+    }
+
+    const itemsByTlqvCode = groupDispatchedItemsByTlqvCode(snapshot.items);
+    const tlqvCodes = [...itemsByTlqvCode.keys()];
     const billedTlqvCodes = await this.findBilledTlqvCodes(
       tlqvCodes,
       comprobantesBatchSize,
@@ -67,15 +73,18 @@ export class FindUnbilledDispatchedStockBueTlqvInteractor {
 
     const items = tlqvCodes
       .filter((tlqvCode) => !billedTlqvCodes.has(tlqvCode))
-      .map((tlqvCode) => toUnbilledItem(tlqvCode, rowsByTlqvCode));
+      .map((tlqvCode) => toUnbilledItem(tlqvCode, itemsByTlqvCode));
 
     return {
       status: 'completed',
       instruction: STOCK_BUE_DISPATCHED_INSTRUCTION,
-      totalSheetRows: stockBue.totalRows,
-      totalDispatchedRows: dispatchedRows.length,
+      cacheRefreshedAt: snapshot.metadata.refreshedAt,
+      totalCacheTlqv: snapshot.items.length,
+      totalSheetRows: snapshot.metadata.totalSheetRows,
+      totalDispatchedRows:
+        snapshot.metadata.totalDispatchedRows ?? itemsByTlqvCode.size,
       totalDispatchedRowsWithoutTlqv:
-        dispatchedRows.length - countRowsWithTlqv(dispatchedRows),
+        snapshot.metadata.totalDispatchedRowsWithoutTlqv ?? 0,
       totalUniqueDispatchedTlqv: tlqvCodes.length,
       totalBilledTlqv: billedTlqvCodes.size,
       totalUnbilledTlqv: items.length,
@@ -97,6 +106,14 @@ export class FindUnbilledDispatchedStockBueTlqvInteractor {
         });
 
       for (const item of response.items) {
+        if (
+          item.documentKind !== undefined &&
+          item.documentKind !== null &&
+          item.documentKind !== 'INVOICE'
+        ) {
+          continue;
+        }
+
         const tlqvCode = normalizeTlqvCode(item.tlqvCode);
         if (tlqvCode !== undefined) {
           billedCodes.add(tlqvCode);
@@ -108,54 +125,50 @@ export class FindUnbilledDispatchedStockBueTlqvInteractor {
   }
 }
 
-function isDispatchedRow(row: StockBueItem): boolean {
-  return (
-    normalizeInstruction(row.data.Instruccion) ===
-    STOCK_BUE_DISPATCHED_INSTRUCTION
-  );
-}
+function groupDispatchedItemsByTlqvCode(
+  items: StockBueTlqvCacheItem[],
+): Map<string, StockBueTlqvCacheItem> {
+  const itemsByTlqvCode = new Map<string, StockBueTlqvCacheItem>();
 
-function groupFirstRowByTlqvCode(
-  rows: StockBueItem[],
-): Map<string, StockBueItem> {
-  const rowsByTlqvCode = new Map<string, StockBueItem>();
-
-  for (const row of rows) {
-    const tlqvCode = normalizeTlqvCode(row.data.TLQV);
-    if (tlqvCode === undefined || rowsByTlqvCode.has(tlqvCode)) {
+  for (const item of items) {
+    if (
+      normalizeInstruction(item.instruction) !==
+      STOCK_BUE_DISPATCHED_INSTRUCTION
+    ) {
       continue;
     }
-    rowsByTlqvCode.set(tlqvCode, row);
+
+    const tlqvCode = normalizeTlqvCode(item.tlqvCode);
+    if (tlqvCode === undefined || itemsByTlqvCode.has(tlqvCode)) {
+      continue;
+    }
+
+    itemsByTlqvCode.set(tlqvCode, item);
   }
 
-  return rowsByTlqvCode;
-}
-
-function countRowsWithTlqv(rows: StockBueItem[]): number {
-  return rows.filter((row) => normalizeTlqvCode(row.data.TLQV) !== undefined)
-    .length;
+  return itemsByTlqvCode;
 }
 
 function toUnbilledItem(
   tlqvCode: string,
-  rowsByTlqvCode: Map<string, StockBueItem>,
+  itemsByTlqvCode: Map<string, StockBueTlqvCacheItem>,
 ): UnbilledDispatchedStockBueTlqvItem {
-  const row = rowsByTlqvCode.get(tlqvCode);
-  if (row === undefined) {
-    throw new Error(`TLQV ${tlqvCode} was not found in stock-bue rows`);
+  const item = itemsByTlqvCode.get(tlqvCode);
+  if (item === undefined) {
+    throw new Error(`TLQV ${tlqvCode} was not found in stock-bue cache`);
   }
 
   return {
     tlqvCode,
-    rowNumber: row.rowNumber,
-    saleNumber: readOptionalText(row.data['N venta']),
-    description: readOptionalText(row.data['Descripción']),
+    rowNumber: item.rowNumber,
+    saleNumber: item.saleNumber,
+    description: item.description,
     instruction: STOCK_BUE_DISPATCHED_INSTRUCTION,
-    fechaRecepcion: readOptionalText(row.data['Fecha recepcion']),
-    fechaSalida: readOptionalText(row.data['Fecha Salida']),
-    fechaLimite: readOptionalText(row.data['Fecha Limite']),
-    fechaInstruccion: readOptionalText(row.data['fecha Instruccion']),
-    rawData: row.data,
+    fechaRecepcion: item.fechaRecepcion,
+    fechaSalida: item.fechaSalida,
+    fechaLimite: item.fechaLimite,
+    fechaInstruccion: item.fechaInstruccion,
+    rawData: item.rawData,
   };
 }
 
@@ -174,11 +187,6 @@ export function normalizeTlqvCode(
 
   const match = normalized.match(/TLQV-\d+/);
   return match?.[0] ?? normalized;
-}
-
-function readOptionalText(value: string | undefined): string | undefined {
-  const normalized = value?.trim();
-  return normalized === '' ? undefined : normalized;
 }
 
 function validatePositiveInteger(value: number, field: string): void {
