@@ -147,3 +147,21 @@ export interface UpsertMadreXubioComprobantesBatchResponse {
   updated?: number;
   failed?: number;
 }
+
+export interface MadreXubioComprobanteTlqvLookupItem {
+  xubioTransactionId?: number | null;
+  externalId?: string | null;
+  numeroDocumento?: string | null;
+  documentKind?: MadreXubioComprobanteDocumentKind | null;
+  tlqvCode: string;
+  tlqvNumber?: number | null;
+  fechaEmision?: string | null;
+}
+
+export interface FindMadreXubioComprobantesByTlqvCodesCommand {
+  tlqvCodes: string[];
+}
+
+export interface FindMadreXubioComprobantesByTlqvCodesResponse {
+  items: MadreXubioComprobanteTlqvLookupItem[];
+}

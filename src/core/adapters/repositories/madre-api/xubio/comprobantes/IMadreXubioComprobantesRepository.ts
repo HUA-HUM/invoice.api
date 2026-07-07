@@ -1,5 +1,7 @@
 import type {
   CreateMadreXubioComprobanteSyncRunCommand,
+  FindMadreXubioComprobantesByTlqvCodesCommand,
+  FindMadreXubioComprobantesByTlqvCodesResponse,
   MadreXubioComprobanteSyncRun,
   UpdateMadreXubioComprobanteSyncRunCommand,
   UpsertMadreXubioComprobantesBatchCommand,
@@ -18,4 +20,8 @@ export interface IMadreXubioComprobantesRepository {
   upsertBatch(
     command: UpsertMadreXubioComprobantesBatchCommand,
   ): Promise<UpsertMadreXubioComprobantesBatchResponse>;
+
+  findByTlqvCodes(
+    command: FindMadreXubioComprobantesByTlqvCodesCommand,
+  ): Promise<FindMadreXubioComprobantesByTlqvCodesResponse>;
 }

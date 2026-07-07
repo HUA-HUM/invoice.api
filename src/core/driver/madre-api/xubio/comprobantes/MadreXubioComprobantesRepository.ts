@@ -2,13 +2,16 @@ import axios, { type AxiosInstance } from 'axios';
 import type { IMadreXubioComprobantesRepository } from '../../../../adapters/repositories/madre-api/xubio/comprobantes/IMadreXubioComprobantesRepository';
 import type {
   CreateMadreXubioComprobanteSyncRunCommand,
+  FindMadreXubioComprobantesByTlqvCodesCommand,
+  FindMadreXubioComprobantesByTlqvCodesResponse,
+  MadreXubioComprobanteDocumentKind,
   MadreXubioComprobanteSyncRun,
+  MadreXubioComprobanteTlqvLookupItem,
   UpdateMadreXubioComprobanteSyncRunCommand,
   UpsertMadreXubioComprobantesBatchCommand,
   UpsertMadreXubioComprobantesBatchResponse,
 } from '../../../../entities/madre-api/xubio/comprobantes/MadreXubioComprobante';
 
-const DEFAULT_BASE_URL = 'https://api.madre.loquieroaca.com';
 const DEFAULT_TIMEOUT_IN_MILLISECONDS = 20_000;
 const BASE_PATH = '/api/internal/xubio/comprobantes';
 
@@ -44,7 +47,7 @@ export class MadreXubioComprobantesRepository implements IMadreXubioComprobantes
     this.httpClient =
       options.httpClient ??
       axios.create({
-        baseURL: options.baseUrl ?? DEFAULT_BASE_URL,
+        baseURL: readRequiredBaseUrl(options.baseUrl),
         timeout:
           options.timeoutInMilliseconds ?? DEFAULT_TIMEOUT_IN_MILLISECONDS,
         headers: buildBaseHeaders(),
@@ -131,6 +134,31 @@ export class MadreXubioComprobantesRepository implements IMadreXubioComprobantes
     }
   }
 
+  async findByTlqvCodes(
+    command: FindMadreXubioComprobantesByTlqvCodesCommand,
+  ): Promise<FindMadreXubioComprobantesByTlqvCodesResponse> {
+    if (command.tlqvCodes.length < 1) {
+      return { items: [] };
+    }
+
+    try {
+      const response = await this.httpClient.post<unknown>(
+        `${BASE_PATH}/search/by-tlqv-codes`,
+        command,
+        {
+          headers: this.buildHeaders(),
+        },
+      );
+
+      return parseFindByTlqvCodesResponse(response.data);
+    } catch (error: unknown) {
+      if (error instanceof MadreXubioComprobantesInvalidResponseError) {
+        throw error;
+      }
+      throw buildRequestError('find by TLQV codes', error);
+    }
+  }
+
   private buildHeaders(): Record<string, string> {
     const headers = buildBaseHeaders();
 
@@ -186,6 +214,14 @@ function buildBaseHeaders(): Record<string, string> {
   };
 }
 
+function readRequiredBaseUrl(value: string | undefined): string {
+  if (value === undefined || value.trim() === '') {
+    throw new Error('Madre API baseUrl is required');
+  }
+
+  return value.trim();
+}
+
 function parseSyncRun(value: unknown): MadreXubioComprobanteSyncRun {
   if (!isRecord(value)) {
     throw new MadreXubioComprobantesInvalidResponseError(
@@ -239,6 +275,80 @@ function readOptionalNumber(
   const value = source[field];
   if (value === undefined || value === null) {
     return undefined;
+  }
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new MadreXubioComprobantesInvalidResponseError(
+      `${field} must be a number, null or undefined`,
+    );
+  }
+  return value;
+}
+
+function parseFindByTlqvCodesResponse(
+  value: unknown,
+): FindMadreXubioComprobantesByTlqvCodesResponse {
+  const rawItems = Array.isArray(value)
+    ? value
+    : isRecord(value) && Array.isArray(value.items)
+      ? value.items
+      : undefined;
+
+  if (rawItems === undefined) {
+    throw new MadreXubioComprobantesInvalidResponseError(
+      'TLQV lookup response must be an array or an object with items array',
+    );
+  }
+
+  return {
+    items: rawItems.map(parseTlqvLookupItem),
+  };
+}
+
+function parseTlqvLookupItem(
+  value: unknown,
+  index: number,
+): MadreXubioComprobanteTlqvLookupItem {
+  if (!isRecord(value)) {
+    throw new MadreXubioComprobantesInvalidResponseError(
+      `items[${index}] must be an object`,
+    );
+  }
+
+  return {
+    xubioTransactionId: readOptionalNullableNumber(value, 'xubioTransactionId'),
+    externalId: readOptionalNullableString(value, 'externalId'),
+    numeroDocumento: readOptionalNullableString(value, 'numeroDocumento'),
+    documentKind: readOptionalNullableString(value, 'documentKind') as
+      MadreXubioComprobanteDocumentKind | null | undefined,
+    tlqvCode: readString(value, 'tlqvCode'),
+    tlqvNumber: readOptionalNullableNumber(value, 'tlqvNumber'),
+    fechaEmision: readOptionalNullableString(value, 'fechaEmision'),
+  };
+}
+
+function readOptionalNullableString(
+  source: Record<string, unknown>,
+  field: string,
+): string | null | undefined {
+  const value = source[field];
+  if (value === undefined || value === null) {
+    return value;
+  }
+  if (typeof value !== 'string') {
+    throw new MadreXubioComprobantesInvalidResponseError(
+      `${field} must be a string, null or undefined`,
+    );
+  }
+  return value;
+}
+
+function readOptionalNullableNumber(
+  source: Record<string, unknown>,
+  field: string,
+): number | null | undefined {
+  const value = source[field];
+  if (value === undefined || value === null) {
+    return value;
   }
   if (typeof value !== 'number' || !Number.isFinite(value)) {
     throw new MadreXubioComprobantesInvalidResponseError(

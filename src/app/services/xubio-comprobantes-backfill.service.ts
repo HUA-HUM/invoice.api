@@ -145,7 +145,7 @@ export class XubioComprobantesBackfillService {
   }
 
   private createMadreXubioComprobantesRepository(): MadreXubioComprobantesRepository {
-    const madreBaseUrl = this.readOptionalConfig('MADRE_API_BASE_URL');
+    const madreBaseUrl = this.readRequiredConfig('MADRE_API_BASE_URL');
     const madreInternalApiKey = this.readRequiredConfig(
       'MADRE_INTERNAL_API_KEY',
     );
