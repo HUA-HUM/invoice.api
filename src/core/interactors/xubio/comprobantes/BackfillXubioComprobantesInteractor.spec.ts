@@ -306,10 +306,16 @@ function createMadreRepository() {
       updated: 0,
       failed: 0,
     }),
+    findByTlqvCodes: jest.fn(),
+    findByTlqvCode: jest.fn(),
+    existsByTlqvCode: jest.fn(),
   } as unknown as IMadreXubioComprobantesRepository & {
     createSyncRun: jest.Mock;
     updateSyncRun: jest.Mock;
     upsertBatch: jest.Mock;
+    findByTlqvCodes: jest.Mock;
+    findByTlqvCode: jest.Mock;
+    existsByTlqvCode: jest.Mock;
   };
 }
 

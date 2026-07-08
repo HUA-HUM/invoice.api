@@ -125,5 +125,6 @@ function createCacheRepository(): IStockBueTlqvCacheRepository & {
   return {
     replaceAll: jest.fn(),
     getSnapshot: jest.fn(),
+    getByTlqvCode: jest.fn(),
   };
 }

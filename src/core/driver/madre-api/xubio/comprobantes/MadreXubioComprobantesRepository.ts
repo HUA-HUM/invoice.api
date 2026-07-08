@@ -2,6 +2,10 @@ import axios, { type AxiosInstance } from 'axios';
 import type { IMadreXubioComprobantesRepository } from '../../../../adapters/repositories/madre-api/xubio/comprobantes/IMadreXubioComprobantesRepository';
 import type {
   CreateMadreXubioComprobanteSyncRunCommand,
+  ExistsMadreXubioComprobanteByTlqvCodeCommand,
+  ExistsMadreXubioComprobanteByTlqvCodeResponse,
+  FindMadreXubioComprobanteByTlqvCodeCommand,
+  FindMadreXubioComprobanteByTlqvCodeResponse,
   FindMadreXubioComprobantesByTlqvCodesCommand,
   FindMadreXubioComprobantesByTlqvCodesResponse,
   MadreXubioComprobanteDocumentKind,
@@ -159,6 +163,56 @@ export class MadreXubioComprobantesRepository implements IMadreXubioComprobantes
     }
   }
 
+  async findByTlqvCode(
+    command: FindMadreXubioComprobanteByTlqvCodeCommand,
+  ): Promise<FindMadreXubioComprobanteByTlqvCodeResponse> {
+    const tlqvCode = command.tlqvCode.trim();
+    if (tlqvCode === '') {
+      return { items: [] };
+    }
+
+    try {
+      const response = await this.httpClient.get<unknown>(
+        `${BASE_PATH}/by-tlqv-code/${encodeURIComponent(tlqvCode)}`,
+        {
+          headers: this.buildHeaders(),
+        },
+      );
+
+      return parseFindByTlqvCodesResponse(response.data);
+    } catch (error: unknown) {
+      if (error instanceof MadreXubioComprobantesInvalidResponseError) {
+        throw error;
+      }
+      throw buildRequestError('find by TLQV code', error);
+    }
+  }
+
+  async existsByTlqvCode(
+    command: ExistsMadreXubioComprobanteByTlqvCodeCommand,
+  ): Promise<ExistsMadreXubioComprobanteByTlqvCodeResponse> {
+    const tlqvCode = command.tlqvCode.trim();
+    if (tlqvCode === '') {
+      return { tlqvCode, exists: false };
+    }
+
+    try {
+      const response = await this.httpClient.get<unknown>(
+        `${BASE_PATH}/exists-by-tlqv-code/${encodeURIComponent(tlqvCode)}`,
+        {
+          headers: this.buildHeaders(),
+        },
+      );
+
+      return parseExistsByTlqvCodeResponse(response.data);
+    } catch (error: unknown) {
+      if (error instanceof MadreXubioComprobantesInvalidResponseError) {
+        throw error;
+      }
+      throw buildRequestError('check if TLQV code exists', error);
+    }
+  }
+
   private buildHeaders(): Record<string, string> {
     const headers = buildBaseHeaders();
 
@@ -291,7 +345,9 @@ function parseFindByTlqvCodesResponse(
     ? value
     : isRecord(value) && Array.isArray(value.items)
       ? value.items
-      : undefined;
+      : isRecord(value) && value.tlqvCode !== undefined
+        ? [value]
+        : undefined;
 
   if (rawItems === undefined) {
     throw new MadreXubioComprobantesInvalidResponseError(
@@ -301,6 +357,21 @@ function parseFindByTlqvCodesResponse(
 
   return {
     items: rawItems.map(parseTlqvLookupItem),
+  };
+}
+
+function parseExistsByTlqvCodeResponse(
+  value: unknown,
+): ExistsMadreXubioComprobanteByTlqvCodeResponse {
+  if (!isRecord(value)) {
+    throw new MadreXubioComprobantesInvalidResponseError(
+      'exists response must be an object',
+    );
+  }
+
+  return {
+    tlqvCode: readString(value, 'tlqvCode'),
+    exists: readBoolean(value, 'exists'),
   };
 }
 
@@ -355,6 +426,17 @@ function readOptionalNullableNumber(
       `${field} must be a number, null or undefined`,
     );
   }
+  return value;
+}
+
+function readBoolean(source: Record<string, unknown>, field: string): boolean {
+  const value = source[field];
+  if (typeof value !== 'boolean') {
+    throw new MadreXubioComprobantesInvalidResponseError(
+      `${field} must be a boolean`,
+    );
+  }
+
   return value;
 }
 

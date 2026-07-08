@@ -156,17 +156,22 @@ function createCacheRepository(): IStockBueTlqvCacheRepository & {
   return {
     replaceAll: jest.fn(),
     getSnapshot: jest.fn(),
+    getByTlqvCode: jest.fn(),
   };
 }
 
 function createComprobantesRepository(): IMadreXubioComprobantesRepository & {
   findByTlqvCodes: jest.Mock;
+  findByTlqvCode: jest.Mock;
+  existsByTlqvCode: jest.Mock;
 } {
   return {
     createSyncRun: jest.fn(),
     updateSyncRun: jest.fn(),
     upsertBatch: jest.fn(),
     findByTlqvCodes: jest.fn(),
+    findByTlqvCode: jest.fn(),
+    existsByTlqvCode: jest.fn(),
   };
 }
 

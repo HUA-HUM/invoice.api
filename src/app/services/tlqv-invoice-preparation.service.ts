@@ -1,19 +1,17 @@
 import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type Redis from 'ioredis';
-import { existsSync, readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
-import { MadreXubioComprobantesRepository } from '../../core/driver/madre-api/xubio/comprobantes/MadreXubioComprobantesRepository';
 import { RedisStockBueTlqvCacheRepository } from '../../core/driver/redis/stock-bue/RedisStockBueTlqvCacheRepository';
+import { MadreXubioComprobantesRepository } from '../../core/driver/madre-api/xubio/comprobantes/MadreXubioComprobantesRepository';
 import {
-  FindUnbilledDispatchedStockBueTlqvInteractor,
-  type FindUnbilledDispatchedStockBueTlqvCommand,
-  type FindUnbilledDispatchedStockBueTlqvResponse,
-} from '../../core/interactors/stock-bue/FindUnbilledDispatchedStockBueTlqvInteractor';
+  PrepareTlqvInvoiceInteractor,
+  type PrepareTlqvInvoiceCommand,
+  type PrepareTlqvInvoiceResponse,
+} from '../../core/interactors/tlqv/PrepareTlqvInvoiceInteractor';
 import { RedisConnectionOptionsFactory } from './redis/redis-connection-options.factory';
 
 @Injectable()
-export class StockBueTlqvAuditService implements OnModuleDestroy {
+export class TlqvInvoicePreparationService implements OnModuleDestroy {
   private readonly redisClient: Redis;
 
   constructor(
@@ -24,8 +22,8 @@ export class StockBueTlqvAuditService implements OnModuleDestroy {
   }
 
   execute(
-    command: FindUnbilledDispatchedStockBueTlqvCommand,
-  ): Promise<FindUnbilledDispatchedStockBueTlqvResponse> {
+    command: PrepareTlqvInvoiceCommand,
+  ): Promise<PrepareTlqvInvoiceResponse> {
     return this.createInteractor().execute(command);
   }
 
@@ -33,7 +31,7 @@ export class StockBueTlqvAuditService implements OnModuleDestroy {
     await this.redisClient.quit();
   }
 
-  private createInteractor(): FindUnbilledDispatchedStockBueTlqvInteractor {
+  private createInteractor(): PrepareTlqvInvoiceInteractor {
     const stockBueTlqvCacheRepository = new RedisStockBueTlqvCacheRepository({
       redisClient: this.redisClient,
       keyPrefix: this.readOptionalConfig('STOCK_BUE_TLQV_CACHE_KEY_PREFIX'),
@@ -48,15 +46,14 @@ export class StockBueTlqvAuditService implements OnModuleDestroy {
         ),
       });
 
-    return new FindUnbilledDispatchedStockBueTlqvInteractor(
+    return new PrepareTlqvInvoiceInteractor(
       stockBueTlqvCacheRepository,
       madreXubioComprobantesRepository,
     );
   }
 
   private readRequiredConfig(name: string): string {
-    const value =
-      this.readFromEnvFile(name) ?? this.configService.get<string>(name);
+    const value = this.configService.get<string>(name);
     if (value === undefined || value.trim() === '') {
       throw new Error(`${name} environment variable is required`);
     }
@@ -64,8 +61,7 @@ export class StockBueTlqvAuditService implements OnModuleDestroy {
   }
 
   private readOptionalConfig(name: string): string | undefined {
-    const value =
-      this.readFromEnvFile(name) ?? this.configService.get<string>(name);
+    const value = this.configService.get<string>(name);
     if (value === undefined || value.trim() === '') {
       return undefined;
     }
@@ -73,8 +69,7 @@ export class StockBueTlqvAuditService implements OnModuleDestroy {
   }
 
   private readNumberConfig(name: string, defaultValue: number): number {
-    const value =
-      this.readFromEnvFile(name) ?? this.configService.get<string>(name);
+    const value = this.configService.get<string>(name);
     if (value === undefined || value.trim() === '') {
       return defaultValue;
     }
@@ -86,44 +81,4 @@ export class StockBueTlqvAuditService implements OnModuleDestroy {
 
     return parsedValue;
   }
-
-  private readFromEnvFile(name: string): string | undefined {
-    const envPath = resolve(process.cwd(), '.env');
-    if (!existsSync(envPath)) {
-      return undefined;
-    }
-
-    const lines = readFileSync(envPath, 'utf8').split(/\r?\n/);
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (trimmed === '' || trimmed.startsWith('#')) {
-        continue;
-      }
-
-      const separatorIndex = trimmed.indexOf('=');
-      if (separatorIndex === -1) {
-        continue;
-      }
-
-      const key = trimmed.slice(0, separatorIndex).trim();
-      if (key !== name) {
-        continue;
-      }
-
-      return stripEnvValueQuotes(trimmed.slice(separatorIndex + 1).trim());
-    }
-
-    return undefined;
-  }
-}
-
-function stripEnvValueQuotes(value: string): string {
-  if (
-    (value.startsWith('"') && value.endsWith('"')) ||
-    (value.startsWith("'") && value.endsWith("'"))
-  ) {
-    return value.slice(1, -1);
-  }
-
-  return value;
 }

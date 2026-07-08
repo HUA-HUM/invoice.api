@@ -35,3 +35,8 @@ export interface StockBueTlqvCacheSnapshot {
   metadata?: StockBueTlqvCacheMetadata;
   items: StockBueTlqvCacheItem[];
 }
+
+export interface StockBueTlqvCacheLookup {
+  metadata?: StockBueTlqvCacheMetadata;
+  item?: StockBueTlqvCacheItem;
+}

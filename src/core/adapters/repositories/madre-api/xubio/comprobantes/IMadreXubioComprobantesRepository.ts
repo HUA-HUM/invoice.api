@@ -1,5 +1,9 @@
 import type {
   CreateMadreXubioComprobanteSyncRunCommand,
+  ExistsMadreXubioComprobanteByTlqvCodeCommand,
+  ExistsMadreXubioComprobanteByTlqvCodeResponse,
+  FindMadreXubioComprobanteByTlqvCodeCommand,
+  FindMadreXubioComprobanteByTlqvCodeResponse,
   FindMadreXubioComprobantesByTlqvCodesCommand,
   FindMadreXubioComprobantesByTlqvCodesResponse,
   MadreXubioComprobanteSyncRun,
@@ -24,4 +28,12 @@ export interface IMadreXubioComprobantesRepository {
   findByTlqvCodes(
     command: FindMadreXubioComprobantesByTlqvCodesCommand,
   ): Promise<FindMadreXubioComprobantesByTlqvCodesResponse>;
+
+  findByTlqvCode(
+    command: FindMadreXubioComprobanteByTlqvCodeCommand,
+  ): Promise<FindMadreXubioComprobanteByTlqvCodeResponse>;
+
+  existsByTlqvCode(
+    command: ExistsMadreXubioComprobanteByTlqvCodeCommand,
+  ): Promise<ExistsMadreXubioComprobanteByTlqvCodeResponse>;
 }

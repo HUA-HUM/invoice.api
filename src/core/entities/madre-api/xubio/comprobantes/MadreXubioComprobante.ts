@@ -165,3 +165,20 @@ export interface FindMadreXubioComprobantesByTlqvCodesCommand {
 export interface FindMadreXubioComprobantesByTlqvCodesResponse {
   items: MadreXubioComprobanteTlqvLookupItem[];
 }
+
+export interface FindMadreXubioComprobanteByTlqvCodeCommand {
+  tlqvCode: string;
+}
+
+export interface FindMadreXubioComprobanteByTlqvCodeResponse {
+  items: MadreXubioComprobanteTlqvLookupItem[];
+}
+
+export interface ExistsMadreXubioComprobanteByTlqvCodeCommand {
+  tlqvCode: string;
+}
+
+export interface ExistsMadreXubioComprobanteByTlqvCodeResponse {
+  tlqvCode: string;
+  exists: boolean;
+}

@@ -153,6 +153,10 @@ export class XubioComprobantesBackfillService {
     return new MadreXubioComprobantesRepository({
       baseUrl: madreBaseUrl,
       internalApiKey: madreInternalApiKey,
+      timeoutInMilliseconds: this.readNumberConfig(
+        'MADRE_API_TIMEOUT_MS',
+        20_000,
+      ),
     });
   }
 

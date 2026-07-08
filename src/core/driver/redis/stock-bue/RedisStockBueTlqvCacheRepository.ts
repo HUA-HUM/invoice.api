@@ -3,6 +3,7 @@ import type { IStockBueTlqvCacheRepository } from '../../../adapters/repositorie
 import type {
   ReplaceStockBueTlqvCacheCommand,
   StockBueTlqvCacheItem,
+  StockBueTlqvCacheLookup,
   StockBueTlqvCacheMetadata,
   StockBueTlqvCacheSnapshot,
 } from '../../../entities/cache/stock-bue/StockBueTlqvCache';
@@ -80,6 +81,25 @@ export class RedisStockBueTlqvCacheRepository implements IStockBueTlqvCacheRepos
       items: Object.values(rawItems).map(
         (value) => JSON.parse(value) as StockBueTlqvCacheItem,
       ),
+    };
+  }
+
+  async getByTlqvCode(tlqvCode: string): Promise<StockBueTlqvCacheLookup> {
+    const keys = this.keys();
+    const [metadataJson, itemJson] = await Promise.all([
+      this.redisClient.hget(keys.metadata, 'value'),
+      this.redisClient.hget(keys.items, tlqvCode),
+    ]);
+
+    return {
+      metadata:
+        metadataJson === null
+          ? undefined
+          : (JSON.parse(metadataJson) as StockBueTlqvCacheMetadata),
+      item:
+        itemJson === null
+          ? undefined
+          : (JSON.parse(itemJson) as StockBueTlqvCacheItem),
     };
   }
 

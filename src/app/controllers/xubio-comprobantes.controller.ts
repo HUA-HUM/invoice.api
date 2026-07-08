@@ -22,6 +22,7 @@ import {
 } from '../services/stock-bue-tlqv-cache-refresh-queue.service';
 import { StockBueTlqvCacheRefreshService } from '../services/stock-bue-tlqv-cache-refresh.service';
 import { StockBueTlqvAuditService } from '../services/stock-bue-tlqv-audit.service';
+import { TlqvInvoicePreparationService } from '../services/tlqv-invoice-preparation.service';
 import { XubioComprobantesBackfillService } from '../services/xubio-comprobantes-backfill.service';
 
 @Controller('internal/xubio/comprobantes')
@@ -33,6 +34,7 @@ export class XubioComprobantesController {
     private readonly stockBueTlqvAuditService: StockBueTlqvAuditService,
     private readonly stockBueTlqvCacheRefreshService: StockBueTlqvCacheRefreshService,
     private readonly stockBueTlqvCacheRefreshQueueService: StockBueTlqvCacheRefreshQueueService,
+    private readonly tlqvInvoicePreparationService: TlqvInvoicePreparationService,
   ) {}
 
   @Post('backfill')
@@ -76,6 +78,13 @@ export class XubioComprobantesController {
       ),
     });
   }
+
+  @Post('tlqv-invoice/prepare')
+  prepareTlqvInvoice(@Body() body: { tlqvCode?: string } = {}) {
+    return this.tlqvInvoicePreparationService.execute({
+      tlqvCode: readRequiredBodyString(body.tlqvCode, 'tlqvCode'),
+    });
+  }
 }
 
 function parseOptionalPositiveInteger(
@@ -92,4 +101,15 @@ function parseOptionalPositiveInteger(
   }
 
   return parsedValue;
+}
+
+function readRequiredBodyString(
+  value: string | undefined,
+  field: string,
+): string {
+  if (value === undefined || value.trim() === '') {
+    throw new BadRequestException(`${field} is required`);
+  }
+
+  return value.trim();
 }
