@@ -1,4 +1,7 @@
-export type XubioIdentificacionTributariaCodigo = 'CUIT' | 'CUIL';
+export type XubioFiscalIdentificacionTributariaCodigo = 'CUIT' | 'CUIL';
+
+export type XubioIdentificacionTributariaCodigo =
+  XubioFiscalIdentificacionTributariaCodigo | 'DNI';
 
 export type XubioCategoriaFiscalCodigo = 'MT' | 'RI' | 'CF' | 'EX';
 
@@ -11,22 +14,17 @@ export interface XubioClienteReference {
   nombre?: string | null;
 }
 
-export interface XubioClientePayload {
+interface XubioClienteBasePayload {
   nombre: string;
   razonSocial: string;
   primerNombre?: string | null;
   primerApellido?: string | null;
-  identificacionTributaria: {
-    codigo: XubioIdentificacionTributariaCodigo;
-  };
   categoriaFiscal: {
     codigo: XubioCategoriaFiscalCodigo;
   };
   pais: {
     codigo: string;
   };
-  cuit: string;
-  CUIT: string;
   direccion?: string | null;
   codigoPostal?: string | null;
   provincia?: {
@@ -37,6 +35,26 @@ export interface XubioClientePayload {
   esclienteextranjero: 0 | 1;
   esProveedor: 0 | 1;
 }
+
+export type XubioClientePayload =
+  | (XubioClienteBasePayload & {
+      identificacionTributaria: {
+        codigo: XubioFiscalIdentificacionTributariaCodigo;
+      };
+      cuit: string;
+      CUIT: string;
+      dni?: never;
+      DNI?: never;
+    })
+  | (XubioClienteBasePayload & {
+      identificacionTributaria: {
+        codigo: 'DNI';
+      };
+      dni: string;
+      DNI: string;
+      cuit?: never;
+      CUIT?: never;
+    });
 
 export interface CreateXubioClienteCommand {
   cliente: XubioClientePayload;
@@ -59,6 +77,7 @@ export interface XubioCliente {
   esClienteExtranjero?: number | null;
   esProveedor?: number | null;
   cuit?: string | null;
+  dni?: string | null;
   rawPayload: unknown;
 }
 
@@ -73,7 +92,7 @@ export interface CreateXubioClienteResponse {
 export interface CreateXubioClienteFromFiscalInfoCommand {
   tlqvCode?: string;
   cuit: string;
-  documentoTipo?: XubioIdentificacionTributariaCodigo;
+  documentoTipo?: XubioFiscalIdentificacionTributariaCodigo;
   nombre?: string | null;
   razonSocial: string;
   primerNombre?: string | null;

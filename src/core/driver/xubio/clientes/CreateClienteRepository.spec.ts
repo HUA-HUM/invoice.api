@@ -34,6 +34,34 @@ describe('CreateClienteRepository', () => {
     expect(result.cliente?.cuit).toBe('20-44482399-3');
   });
 
+  it('creates a Xubio consumidor final cliente with DNI', async () => {
+    const post = jest.fn().mockResolvedValue({
+      data: createXubioDniClienteResponse(),
+    });
+    const repository = new CreateClienteRepository({
+      accessTokenProvider: () => Promise.resolve('access-token'),
+      httpClient: { post } as unknown as AxiosInstance,
+    });
+
+    const result = await repository.create({
+      cliente: createXubioDniClientePayload(),
+    });
+
+    expect(post).toHaveBeenCalledWith(
+      '/API/1.1/clienteBean',
+      createXubioDniClientePayload(),
+      {
+        headers: {
+          Authorization: 'Bearer access-token',
+        },
+      },
+    );
+    expect(result.status).toBe('created');
+    expect(result.created).toBe(true);
+    expect(result.cliente?.clienteId).toBe(10256469);
+    expect(result.cliente?.dni).toBe('44482399');
+  });
+
   it('returns already_exists when Xubio says the cliente already exists', async () => {
     const error = {
       isAxiosError: true,
@@ -144,6 +172,35 @@ function createXubioClientePayload() {
   };
 }
 
+function createXubioDniClientePayload() {
+  return {
+    nombre: 'FELIPE ZAMPELLA',
+    razonSocial: 'FELIPE ZAMPELLA',
+    primerNombre: 'FELIPE',
+    primerApellido: 'ZAMPELLA',
+    identificacionTributaria: {
+      codigo: 'DNI' as const,
+    },
+    categoriaFiscal: {
+      codigo: 'CF' as const,
+    },
+    pais: {
+      codigo: 'ARGENTINA',
+    },
+    dni: '44482399',
+    DNI: '44482399',
+    direccion: 'CALDAS 1551',
+    codigoPostal: '1427',
+    provincia: {
+      nombre: 'CIUDAD AUTONOMA DE BUENOS AIRES',
+    },
+    usrCode: 'TLQV-20444823993',
+    descripcion: 'Cliente creado automáticamente desde TLQV',
+    esclienteextranjero: 0 as const,
+    esProveedor: 0 as const,
+  };
+}
+
 function createXubioClienteResponse() {
   return {
     cliente_id: 10256469,
@@ -179,5 +236,25 @@ function createXubioClienteResponse() {
     esProveedor: 0,
     cuit: '20-44482399-3',
     CUIT: '20-44482399-3',
+  };
+}
+
+function createXubioDniClienteResponse() {
+  return {
+    ...createXubioClienteResponse(),
+    identificacionTributaria: {
+      ID: 4,
+      codigo: 'DNI',
+      id: 4,
+    },
+    categoriaFiscal: {
+      ID: 6,
+      codigo: 'CF',
+      id: 6,
+    },
+    dni: '44482399',
+    DNI: '44482399',
+    cuit: undefined,
+    CUIT: undefined,
   };
 }

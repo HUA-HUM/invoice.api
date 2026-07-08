@@ -43,6 +43,8 @@ export interface UpsertInvoiceClientIssueCommand {
   email?: string | null;
   cuit?: string | null;
   documentoTipo?: string | null;
+  documentoNro?: string | null;
+  documentoNroDigits?: string | null;
   message: string;
   messages?: string[];
   rawPayload?: unknown;

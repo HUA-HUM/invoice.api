@@ -151,6 +151,11 @@ function buildUpsertPayload(
   command: UpsertInvoiceClientIssueCommand,
 ): UpsertMadreInvoiceClientIssuePayload {
   const cuit = normalizeOptionalString(command.cuit);
+  const documentoNro = normalizeOptionalString(command.documentoNro) ?? cuit;
+  const documentoNroDigits =
+    normalizeOptionalString(command.documentoNroDigits) ??
+    documentoNro?.replace(/\D/g, '') ??
+    null;
   const messages =
     command.messages === undefined || command.messages.length === 0
       ? [command.message]
@@ -164,8 +169,8 @@ function buildUpsertPayload(
     buyerName: normalizeOptionalString(command.buyerName),
     email: normalizeOptionalString(command.email),
     documentoTipo: normalizeOptionalString(command.documentoTipo),
-    documentoNro: cuit,
-    documentoNroDigits: cuit?.replace(/\D/g, '') ?? null,
+    documentoNro,
+    documentoNroDigits,
     message: command.message,
     messages,
     rawPayload: command.rawPayload,

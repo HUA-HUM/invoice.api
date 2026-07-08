@@ -21,6 +21,22 @@ export class TlqvInvoiceClientesController {
       tlqvCode: readRequiredBodyString(body.tlqvCode, 'tlqvCode'),
     });
   }
+
+  @Post('create-consumidor-final-from-issue')
+  createConsumidorFinalFromIssue(
+    @Body()
+    body: {
+      tlqvCode?: string;
+      issueId?: number | string;
+      dni?: string;
+    } = {},
+  ) {
+    return this.tlqvInvoiceClientesService.createConsumidorFinalFromIssue({
+      tlqvCode: readRequiredBodyString(body.tlqvCode, 'tlqvCode'),
+      issueId: readOptionalPositiveInteger(body.issueId, 'issueId'),
+      dni: readOptionalBodyString(body.dni),
+    });
+  }
 }
 
 function readRequiredBodyString(
@@ -32,4 +48,28 @@ function readRequiredBodyString(
   }
 
   return value.trim();
+}
+
+function readOptionalBodyString(value: string | undefined): string | undefined {
+  if (value === undefined || value.trim() === '') {
+    return undefined;
+  }
+
+  return value.trim();
+}
+
+function readOptionalPositiveInteger(
+  value: number | string | undefined,
+  field: string,
+): number | undefined {
+  if (value === undefined || value === '') {
+    return undefined;
+  }
+
+  const numberValue = typeof value === 'number' ? value : Number(value.trim());
+  if (!Number.isInteger(numberValue) || numberValue < 1) {
+    throw new BadRequestException(`${field} must be a positive integer`);
+  }
+
+  return numberValue;
 }

@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import type {
   XubioCategoriaFiscalCodigo,
-  XubioIdentificacionTributariaCodigo,
+  XubioFiscalIdentificacionTributariaCodigo,
 } from '../../core/entities/xubio/clientes/XubioCliente';
 import { InternalApiKeyGuard } from '../guards/internal-api-key.guard';
 import { XubioClientesService } from '../services/xubio-clientes.service';
@@ -23,7 +23,7 @@ export class XubioClientesController {
     body: {
       tlqvCode?: string;
       cuit?: string;
-      documentoTipo?: XubioIdentificacionTributariaCodigo;
+      documentoTipo?: XubioFiscalIdentificacionTributariaCodigo;
       nombre?: string | null;
       razonSocial?: string;
       primerNombre?: string | null;
@@ -81,8 +81,8 @@ function readOptionalBodyString(
 }
 
 function readOptionalDocumentoTipo(
-  value: XubioIdentificacionTributariaCodigo | undefined,
-): XubioIdentificacionTributariaCodigo | undefined {
+  value: XubioFiscalIdentificacionTributariaCodigo | undefined,
+): XubioFiscalIdentificacionTributariaCodigo | undefined {
   if (value === undefined) {
     return undefined;
   }

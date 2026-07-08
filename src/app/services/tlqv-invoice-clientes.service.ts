@@ -13,6 +13,11 @@ import { GetAccessTokenRepository } from '../../core/driver/xubio/auth/GetAccess
 import { CreateClienteRepository } from '../../core/driver/xubio/clientes/CreateClienteRepository';
 import type { XubioRequestRetryOptions } from '../../core/driver/xubio/XubioRequestRetry';
 import {
+  CreateXubioConsumidorFinalClienteFromIssueInteractor,
+  type CreateXubioConsumidorFinalClienteFromIssueCommand,
+  type CreateXubioConsumidorFinalClienteFromIssueResponse,
+} from '../../core/interactors/tlqv/CreateXubioConsumidorFinalClienteFromIssueInteractor';
+import {
   CreateXubioClienteFromTlqvInteractor,
   type CreateXubioClienteFromTlqvCommand,
   type CreateXubioClienteFromTlqvResponse,
@@ -34,6 +39,12 @@ export class TlqvInvoiceClientesService implements OnModuleDestroy {
     command: CreateXubioClienteFromTlqvCommand,
   ): Promise<CreateXubioClienteFromTlqvResponse> {
     return this.createInteractor().execute(command);
+  }
+
+  createConsumidorFinalFromIssue(
+    command: CreateXubioConsumidorFinalClienteFromIssueCommand,
+  ): Promise<CreateXubioConsumidorFinalClienteFromIssueResponse> {
+    return this.createConsumidorFinalFromIssueInteractor().execute(command);
   }
 
   async onModuleDestroy(): Promise<void> {
@@ -92,6 +103,39 @@ export class TlqvInvoiceClientesService implements OnModuleDestroy {
           'MADRE_API_TIMEOUT_MS',
           20_000,
         ),
+      }),
+      () => new Date(),
+    );
+  }
+
+  private createConsumidorFinalFromIssueInteractor(): CreateXubioConsumidorFinalClienteFromIssueInteractor {
+    const xubioBaseUrl = this.readOptionalConfig('XUBIO_BASE_URL');
+    const retryOptions = this.readXubioRetryOptions();
+    const tokenRepository = new GetAccessTokenRepository({
+      baseUrl: xubioBaseUrl,
+      basicAuthorizationToken: this.readRequiredConfig(
+        'XUBIO_BASIC_AUTHORIZATION',
+      ),
+      retryOptions,
+    });
+    const tokenProvider = new CachedXubioAccessTokenProvider(tokenRepository);
+    const accessTokenProvider = () => tokenProvider.getAccessToken();
+    const onAuthorizationFailure = () => tokenProvider.invalidateAccessToken();
+
+    return new CreateXubioConsumidorFinalClienteFromIssueInteractor(
+      new MadreInvoiceClientIssuesRepository({
+        baseUrl: this.readRequiredConfig('MADRE_API_BASE_URL'),
+        internalApiKey: this.readRequiredConfig('MADRE_INTERNAL_API_KEY'),
+        timeoutInMilliseconds: this.readNumberConfig(
+          'MADRE_API_TIMEOUT_MS',
+          20_000,
+        ),
+      }),
+      new CreateClienteRepository({
+        baseUrl: xubioBaseUrl,
+        accessTokenProvider,
+        onAuthorizationFailure,
+        retryOptions,
       }),
       () => new Date(),
     );
