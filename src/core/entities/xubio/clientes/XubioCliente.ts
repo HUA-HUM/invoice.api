@@ -14,17 +14,22 @@ export interface XubioClienteReference {
   nombre?: string | null;
 }
 
-interface XubioClienteBasePayload {
+export interface XubioClientePayload {
   nombre: string;
   razonSocial: string;
   primerNombre?: string | null;
   primerApellido?: string | null;
+  identificacionTributaria: {
+    codigo: XubioIdentificacionTributariaCodigo;
+  };
   categoriaFiscal: {
     codigo: XubioCategoriaFiscalCodigo;
   };
   pais: {
     codigo: string;
   };
+  cuit: string;
+  CUIT: string;
   direccion?: string | null;
   codigoPostal?: string | null;
   provincia?: {
@@ -35,26 +40,6 @@ interface XubioClienteBasePayload {
   esclienteextranjero: 0 | 1;
   esProveedor: 0 | 1;
 }
-
-export type XubioClientePayload =
-  | (XubioClienteBasePayload & {
-      identificacionTributaria: {
-        codigo: XubioFiscalIdentificacionTributariaCodigo;
-      };
-      cuit: string;
-      CUIT: string;
-      dni?: never;
-      DNI?: never;
-    })
-  | (XubioClienteBasePayload & {
-      identificacionTributaria: {
-        codigo: 'DNI';
-      };
-      dni: string;
-      DNI: string;
-      cuit?: never;
-      CUIT?: never;
-    });
 
 export interface CreateXubioClienteCommand {
   cliente: XubioClientePayload;

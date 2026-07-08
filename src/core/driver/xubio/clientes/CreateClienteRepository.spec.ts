@@ -59,7 +59,7 @@ describe('CreateClienteRepository', () => {
     expect(result.status).toBe('created');
     expect(result.created).toBe(true);
     expect(result.cliente?.clienteId).toBe(10256469);
-    expect(result.cliente?.dni).toBe('44482399');
+    expect(result.cliente?.cuit).toBe('44.482.399');
   });
 
   it('returns already_exists when Xubio says the cliente already exists', async () => {
@@ -187,8 +187,8 @@ function createXubioDniClientePayload() {
     pais: {
       codigo: 'ARGENTINA',
     },
-    dni: '44482399',
-    DNI: '44482399',
+    cuit: '44.482.399',
+    CUIT: '44.482.399',
     direccion: 'CALDAS 1551',
     codigoPostal: '1427',
     provincia: {
@@ -252,9 +252,7 @@ function createXubioDniClienteResponse() {
       codigo: 'CF',
       id: 6,
     },
-    dni: '44482399',
-    DNI: '44482399',
-    cuit: undefined,
-    CUIT: undefined,
+    cuit: '44.482.399',
+    CUIT: '44.482.399',
   };
 }

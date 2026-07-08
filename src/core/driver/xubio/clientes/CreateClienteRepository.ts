@@ -228,13 +228,8 @@ function validateClientePayload(value: XubioClientePayload): void {
     'categoriaFiscal.codigo',
   );
   validateNonEmptyString(value.pais.codigo, 'pais.codigo');
-  if (value.identificacionTributaria.codigo === 'DNI') {
-    validateNonEmptyString(value.dni ?? '', 'dni');
-    validateNonEmptyString(value.DNI ?? '', 'DNI');
-  } else {
-    validateNonEmptyString(value.cuit ?? '', 'cuit');
-    validateNonEmptyString(value.CUIT ?? '', 'CUIT');
-  }
+  validateNonEmptyString(value.cuit, 'cuit');
+  validateNonEmptyString(value.CUIT, 'CUIT');
   validateNonEmptyString(value.usrCode, 'usrCode');
   validateNonEmptyString(value.descripcion, 'descripcion');
 }

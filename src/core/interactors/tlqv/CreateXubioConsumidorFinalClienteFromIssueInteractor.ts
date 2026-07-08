@@ -244,6 +244,7 @@ function buildConsumidorFinalClienteData(
   const nameParts = splitName(buyerName);
   const provincia = getIssueMetadataString(issue, 'provincia');
   const usrCode = `TLQV-${originalDocumentoDigits}`;
+  const formattedDni = formatDni(dni);
   const payload: XubioClientePayload = {
     nombre: buyerName,
     razonSocial: buyerName,
@@ -258,8 +259,8 @@ function buildConsumidorFinalClienteData(
     pais: {
       codigo: DEFAULT_PAIS_CODIGO,
     },
-    dni,
-    DNI: dni,
+    cuit: formattedDni,
+    CUIT: formattedDni,
     direccion: getIssueMetadataString(issue, 'direccion'),
     codigoPostal: normalizeCodigoPostal(
       getIssueMetadataString(issue, 'codigoPostal'),
@@ -332,6 +333,10 @@ function normalizeDniDigits(value: string | null | undefined): string | null {
 
 function isDniLength(value: string): boolean {
   return value.length >= 7 && value.length <= 8;
+}
+
+function formatDni(digits: string): string {
+  return digits.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
 }
 
 function normalizeDigits(value: string | null | undefined): string | null {

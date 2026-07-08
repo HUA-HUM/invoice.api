@@ -42,8 +42,8 @@ describe('CreateXubioConsumidorFinalClienteFromIssueInteractor', () => {
         pais: {
           codigo: 'ARGENTINA',
         },
-        dni: '44482399',
-        DNI: '44482399',
+        cuit: '44.482.399',
+        CUIT: '44.482.399',
         direccion: 'CALDAS 1551',
         codigoPostal: '1427',
         provincia: {
@@ -90,8 +90,8 @@ describe('CreateXubioConsumidorFinalClienteFromIssueInteractor', () => {
         pais: {
           codigo: 'ARGENTINA',
         },
-        dni: '44482399',
-        DNI: '44482399',
+        cuit: '44.482.399',
+        CUIT: '44.482.399',
         direccion: 'CALDAS 1551',
         codigoPostal: '1427',
         provincia: {
