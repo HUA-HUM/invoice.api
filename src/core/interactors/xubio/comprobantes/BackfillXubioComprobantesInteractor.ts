@@ -673,7 +673,7 @@ function getTipoNombre(kind: MadreXubioComprobanteDocumentKind): string {
 function extractTlqv(
   descripcion: string,
 ): { code: string; number: number } | null {
-  const match = /TLQV-?\s*(\d+)/i.exec(descripcion);
+  const match = /\bTLQV\s*-?\s*(\d+)\b/i.exec(descripcion);
   if (match === null) {
     return null;
   }

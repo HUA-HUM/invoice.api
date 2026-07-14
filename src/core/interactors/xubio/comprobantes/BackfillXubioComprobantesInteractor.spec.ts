@@ -167,6 +167,45 @@ describe('BackfillXubioComprobantesInteractor', () => {
     expect(result.status).toBe('completed');
   });
 
+  it('normalizes TLQV codes with spaces around the hyphen', async () => {
+    const summary = {
+      ...createSummary(10835),
+      descripcion: 'TLQV -10835',
+    };
+    const detail = {
+      ...createDetail(10835),
+      descripcion: 'TLQV - 10835',
+    };
+    const getByDateRangeRepository = createGetByDateRangeRepository();
+    getByDateRangeRepository.getByDateRange.mockResolvedValue({
+      comprobantes: [summary],
+    });
+    const getDetailRepository = createGetDetailRepository();
+    getDetailRepository.getDetail.mockResolvedValue({ comprobante: detail });
+    const madreRepository = createMadreRepository();
+    const interactor = new BackfillXubioComprobantesInteractor(
+      getByDateRangeRepository,
+      getDetailRepository,
+      madreRepository,
+      () => new Date('2026-05-20T12:00:00.000Z'),
+    );
+
+    await interactor.execute({
+      fechaDesde: '2026-05-20',
+      fechaHasta: '2026-05-20',
+      batchSize: 1,
+    });
+
+    expect(madreRepository.upsertBatch).toHaveBeenCalledWith({
+      items: [
+        expect.objectContaining({
+          tlqvCode: 'TLQV-10835',
+          tlqvNumber: 10835,
+        }),
+      ],
+    });
+  });
+
   it('updates sync progress after each batch window', async () => {
     const getByDateRangeRepository = createGetByDateRangeRepository();
     getByDateRangeRepository.getByDateRange.mockResolvedValue({

@@ -457,7 +457,7 @@ function collectCsvTlqvOccurrences(
   ]);
 
   for (const row of csv.dataRows) {
-    const tlqvCodes = extractTlqvCodes(row.cells.join(' '));
+    const tlqvCodes = extractTlqvCodesFromCsvRow(row, descripcionIndex);
     if (tlqvCodes.length < 1) {
       continue;
     }
@@ -482,6 +482,32 @@ function collectCsvTlqvOccurrences(
   }
 
   return occurrencesByTlqvCode;
+}
+
+function extractTlqvCodesFromCsvRow(
+  row: ParsedCsvRow,
+  descripcionIndex: number,
+): string[] {
+  const description = readOptionalCell(row, descripcionIndex);
+  const primaryDescriptionTlqvCode =
+    extractPrimaryDescriptionTlqvCode(description);
+
+  if (primaryDescriptionTlqvCode !== undefined) {
+    return [primaryDescriptionTlqvCode];
+  }
+
+  return extractTlqvCodes(row.cells.join(' '));
+}
+
+function extractPrimaryDescriptionTlqvCode(
+  description: string | undefined,
+): string | undefined {
+  if (description === undefined) {
+    return undefined;
+  }
+
+  const primaryDescriptionSegment = description.split(/\bML\s*:/i)[0] ?? '';
+  return extractTlqvCodes(primaryDescriptionSegment)[0];
 }
 
 function findHeaderIndex(headers: string[], expectedNames: string[]): number {
