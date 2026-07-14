@@ -1,9 +1,10 @@
 import type { IInvoiceClientIssueRepository } from '../../adapters/repositories/invoice/client-issues/IInvoiceClientIssueRepository';
 import type { IStockBueTlqvCacheRepository } from '../../adapters/repositories/cache/stock-bue/IStockBueTlqvCacheRepository';
-import type { IGetFlokzuProcessInstanceRepository } from '../../adapters/repositories/flokzu/process-instance/IGetFlokzuProcessInstanceRepository';
 import type { IMadreXubioComprobantesRepository } from '../../adapters/repositories/madre-api/xubio/comprobantes/IMadreXubioComprobantesRepository';
+import type { IGetTlqvOrderDetailsRepository } from '../../adapters/repositories/tlqv/order-details/IGetTlqvOrderDetailsRepository';
 import type { IGetTusFacturasAfipInfoRepository } from '../../adapters/repositories/tus-facturas/afip-info/IGetTusFacturasAfipInfoRepository';
 import type { ICreateXubioClienteRepository } from '../../adapters/repositories/xubio/clientes/ICreateXubioClienteRepository';
+import type { TlqvOrderBuyerData } from '../../entities/tlqv/order-details/TlqvOrderDetails';
 import { CreateXubioClienteFromTlqvInteractor } from './CreateXubioClienteFromTlqvInteractor';
 
 describe('CreateXubioClienteFromTlqvInteractor', () => {
@@ -17,9 +18,12 @@ describe('CreateXubioClienteFromTlqvInteractor', () => {
     if (result.status !== 'created') {
       throw new Error('Expected created response');
     }
-    expect(repositories.flokzu.getByIdentifier).toHaveBeenCalledWith({
-      identifier: 'TLQV-14921',
+    expect(repositories.opsOrderDetails.getByTlqvCode).toHaveBeenCalledWith({
+      tlqvCode: 'TLQV-14921',
     });
+    expect(
+      repositories.flokzuOrderDetails.getByTlqvCode,
+    ).not.toHaveBeenCalled();
     expect(repositories.tusFacturas.getAfipInfo).toHaveBeenCalledWith({
       tlqvCode: 'TLQV-14921',
       documentoNro: '27187719572',
@@ -30,6 +34,12 @@ describe('CreateXubioClienteFromTlqvInteractor', () => {
         email: 'taniasilvia.coronel@gmail.com',
         metadata: {
           source: 'create_xubio_cliente_from_tlqv',
+          orderDetailsSource: 'ops_api',
+          orderDetails: {
+            tlqvCode: 'TLQV-14921',
+            saleNumber: '200001111',
+            source: 'ops_api',
+          },
           stockBue: {
             rowNumber: 10,
             instruction: 'DESPACHADA',
@@ -39,7 +49,7 @@ describe('CreateXubioClienteFromTlqvInteractor', () => {
             fechaLimite: undefined,
             fechaInstruccion: undefined,
           },
-          flokzuBuyerData: {
+          buyerData: {
             nombreDestinatario: 'Tania Silvia Coronel Alferrano',
             direccion: 'Belgrano 53',
             ciudad: 'CORDOBA',
@@ -48,6 +58,7 @@ describe('CreateXubioClienteFromTlqvInteractor', () => {
             telefono: '(351) 15 651-3528',
             email: 'taniasilvia.coronel@gmail.com',
           },
+          flokzuBuyerData: undefined,
         },
       },
     });
@@ -82,6 +93,31 @@ describe('CreateXubioClienteFromTlqvInteractor', () => {
     expect(result.xubioClienteResult.created).toBe(true);
   });
 
+  it('falls back to Flokzu when Ops API does not find the TLQV', async () => {
+    const repositories = createRepositories();
+    repositories.opsOrderDetails.getByTlqvCode.mockResolvedValue({
+      found: false,
+      tlqvCode: 'TLQV-14921',
+      source: 'ops_api',
+      reason: 'not_found',
+    });
+    const interactor = createInteractor(repositories);
+
+    const result = await interactor.execute({ tlqvCode: 'TLQV-14921' });
+
+    expect(result.status).toBe('created');
+    expect(repositories.opsOrderDetails.getByTlqvCode).toHaveBeenCalledWith({
+      tlqvCode: 'TLQV-14921',
+    });
+    expect(repositories.flokzuOrderDetails.getByTlqvCode).toHaveBeenCalledWith({
+      tlqvCode: 'TLQV-14921',
+    });
+    if (result.status !== 'created') {
+      throw new Error('Expected created response');
+    }
+    expect(result.orderDetails.source).toBe('flokzu');
+  });
+
   it('returns blocked when prepare validation blocks the TLQV', async () => {
     const repositories = createRepositories();
     repositories.madre.existsByTlqvCode.mockResolvedValue({
@@ -100,7 +136,10 @@ describe('CreateXubioClienteFromTlqvInteractor', () => {
     expect(result.blockers).toEqual([
       expect.objectContaining({ code: 'ALREADY_BILLED' }),
     ]);
-    expect(repositories.flokzu.getByIdentifier).not.toHaveBeenCalled();
+    expect(repositories.opsOrderDetails.getByTlqvCode).not.toHaveBeenCalled();
+    expect(
+      repositories.flokzuOrderDetails.getByTlqvCode,
+    ).not.toHaveBeenCalled();
   });
 
   it('returns blocked when Madre billing validation is unavailable', async () => {
@@ -122,15 +161,19 @@ describe('CreateXubioClienteFromTlqvInteractor', () => {
         code: 'BILLING_VALIDATION_UNAVAILABLE',
       }),
     ]);
-    expect(repositories.flokzu.getByIdentifier).not.toHaveBeenCalled();
+    expect(repositories.opsOrderDetails.getByTlqvCode).not.toHaveBeenCalled();
+    expect(
+      repositories.flokzuOrderDetails.getByTlqvCode,
+    ).not.toHaveBeenCalled();
     expect(repositories.tusFacturas.getAfipInfo).not.toHaveBeenCalled();
     expect(repositories.xubioClientes.create).not.toHaveBeenCalled();
   });
 
-  it('returns blocked when Flokzu does not have CUITCOMPRADOR', async () => {
+  it('returns blocked when order details do not have buyer CUIT', async () => {
     const repositories = createRepositories();
-    repositories.flokzu.getByIdentifier.mockResolvedValue({
-      processInstance: createFlokzuProcessInstance({
+    repositories.opsOrderDetails.getByTlqvCode.mockResolvedValue({
+      found: true,
+      orderDetails: createOrderDetails({
         cuitComprador: null,
         cuitCompradorDigits: null,
       }),
@@ -182,6 +225,12 @@ describe('CreateXubioClienteFromTlqvInteractor', () => {
       rawPayload: { error: 'S' },
       metadata: {
         source: 'create_xubio_cliente_from_tlqv',
+        orderDetailsSource: 'ops_api',
+        orderDetails: {
+          tlqvCode: 'TLQV-14921',
+          saleNumber: '200001111',
+          source: 'ops_api',
+        },
         stockBue: {
           rowNumber: 10,
           instruction: 'DESPACHADA',
@@ -191,7 +240,7 @@ describe('CreateXubioClienteFromTlqvInteractor', () => {
           fechaLimite: undefined,
           fechaInstruccion: undefined,
         },
-        flokzuBuyerData: {
+        buyerData: {
           nombreDestinatario: 'Tania Silvia Coronel Alferrano',
           direccion: 'Belgrano 53',
           ciudad: 'CORDOBA',
@@ -200,6 +249,7 @@ describe('CreateXubioClienteFromTlqvInteractor', () => {
           telefono: '(351) 15 651-3528',
           email: 'taniasilvia.coronel@gmail.com',
         },
+        flokzuBuyerData: undefined,
       },
       now: new Date('2026-07-07T12:00:00.000Z'),
     });
@@ -211,7 +261,7 @@ function createInteractor(repositories: ReturnType<typeof createRepositories>) {
   return new CreateXubioClienteFromTlqvInteractor(
     repositories.cache,
     repositories.madre,
-    repositories.flokzu,
+    [repositories.opsOrderDetails, repositories.flokzuOrderDetails],
     repositories.tusFacturas,
     repositories.xubioClientes,
     repositories.issues,
@@ -226,8 +276,11 @@ function createRepositories(): {
     findByTlqvCode: jest.Mock;
     existsByTlqvCode: jest.Mock;
   };
-  flokzu: IGetFlokzuProcessInstanceRepository & {
-    getByIdentifier: jest.Mock;
+  opsOrderDetails: IGetTlqvOrderDetailsRepository & {
+    getByTlqvCode: jest.Mock;
+  };
+  flokzuOrderDetails: IGetTlqvOrderDetailsRepository & {
+    getByTlqvCode: jest.Mock;
   };
   tusFacturas: IGetTusFacturasAfipInfoRepository & {
     getAfipInfo: jest.Mock;
@@ -255,9 +308,16 @@ function createRepositories(): {
         exists: false,
       }),
     },
-    flokzu: {
-      getByIdentifier: jest.fn().mockResolvedValue({
-        processInstance: createFlokzuProcessInstance(),
+    opsOrderDetails: {
+      getByTlqvCode: jest.fn().mockResolvedValue({
+        found: true,
+        orderDetails: createOrderDetails(),
+      }),
+    },
+    flokzuOrderDetails: {
+      getByTlqvCode: jest.fn().mockResolvedValue({
+        found: true,
+        orderDetails: createOrderDetails({ source: 'flokzu' }),
       }),
     },
     tusFacturas: {
@@ -298,13 +358,15 @@ function createRepositories(): {
   };
 }
 
-function createFlokzuProcessInstance(
+function createOrderDetails(
   buyerOverrides: Partial<{
+    source: 'ops_api' | 'flokzu';
     cuitComprador: string | null;
     cuitCompradorDigits: string | null;
   }> = {},
 ) {
-  const buyerData = {
+  const source = buyerOverrides.source ?? 'ops_api';
+  const buyerData: TlqvOrderBuyerData = {
     cuitComprador: '27-18771957-2',
     cuitCompradorDigits: '27187719572',
     cuitEnvio: '27-18771957-2',
@@ -318,12 +380,12 @@ function createFlokzuProcessInstance(
     email: 'taniasilvia.coronel@gmail.com',
     ...buyerOverrides,
   };
+  delete (buyerData as { source?: string }).source;
 
   return {
-    identifier: 'TLQV-14921',
-    fields: {},
-    cuitComprador: buyerData.cuitComprador,
-    cuitCompradorDigits: buyerData.cuitCompradorDigits,
+    tlqvCode: 'TLQV-14921',
+    source,
+    saleNumber: '200001111',
     buyerData,
     rawPayload: {},
   };

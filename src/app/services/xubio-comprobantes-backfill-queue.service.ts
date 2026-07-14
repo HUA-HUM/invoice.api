@@ -1,4 +1,9 @@
-import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnModuleDestroy,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Job, Queue, Worker, type JobsOptions } from 'bullmq';
 import type {
@@ -6,12 +11,17 @@ import type {
   BackfillXubioComprobantesResponse,
   NormalizedBackfillXubioComprobantesCommand,
 } from '../../core/interactors/xubio/comprobantes/BackfillXubioComprobantesInteractor';
-import { RedisConnectionOptionsFactory } from './redis/redis-connection-options.factory';
+import {
+  readErrorMessage,
+  waitUntilQueueReady,
+} from '../drivers/queue/wait-until-queue-ready';
+import { RedisConnectionOptionsFactory } from '../drivers/redis/redis-connection-options.factory';
 import { XubioComprobantesBackfillService } from './xubio-comprobantes-backfill.service';
 
 export const XUBIO_COMPROBANTES_BACKFILL_QUEUE_NAME =
   'xubio-comprobantes-backfill';
 const XUBIO_COMPROBANTES_BACKFILL_JOB_NAME = 'historical-backfill';
+const DEFAULT_QUEUE_READY_TIMEOUT_MS = 10_000;
 
 interface XubioComprobantesBackfillJobData {
   syncRunId: number;
@@ -119,7 +129,7 @@ export class XubioComprobantesBackfillQueueService implements OnModuleDestroy {
   async enqueue(
     command: BackfillXubioComprobantesCommand,
   ): Promise<EnqueueXubioComprobantesBackfillResponse> {
-    await this.queue.waitUntilReady();
+    await this.waitUntilQueueReady();
 
     const syncRun = await this.backfillService.createSyncRun(command);
     const jobId = buildBackfillJobId(syncRun.syncRunId);
@@ -223,6 +233,24 @@ export class XubioComprobantesBackfillQueueService implements OnModuleDestroy {
         ),
       },
     };
+  }
+
+  private async waitUntilQueueReady(): Promise<void> {
+    try {
+      await waitUntilQueueReady(
+        this.queue,
+        this.readNumberConfig(
+          'XUBIO_COMPROBANTES_QUEUE_READY_TIMEOUT_MS',
+          DEFAULT_QUEUE_READY_TIMEOUT_MS,
+        ),
+      );
+    } catch (error: unknown) {
+      throw new ServiceUnavailableException(
+        `Xubio comprobantes backfill queue is not ready. ${readErrorMessage(
+          error,
+        )}`,
+      );
+    }
   }
 
   private readOptionalConfig(name: string): string | undefined {

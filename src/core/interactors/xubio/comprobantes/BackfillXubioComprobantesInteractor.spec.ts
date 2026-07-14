@@ -39,6 +39,15 @@ describe('BackfillXubioComprobantesInteractor', () => {
     expect(command.xubioLimit).toBe(100);
   });
 
+  it('rejects invalid calendar dates before calling external APIs', () => {
+    expect(() =>
+      normalizeBackfillXubioComprobantesCommand({
+        fechaDesde: '2025-25-15',
+        fechaHasta: '2026-03-24',
+      }),
+    ).toThrow('fechaDesde must be a valid calendar date in YYYY-MM-DD format');
+  });
+
   it('gets summaries, gets details and upserts them in Madre API', async () => {
     const summary = createSummary(54231396);
     const detail = createDetail(54231396);

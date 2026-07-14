@@ -5,18 +5,85 @@ import {
   Post,
   UseGuards,
 } from '@nestjs/common';
+import { ApiBody, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type {
   XubioCategoriaFiscalCodigo,
   XubioFiscalIdentificacionTributariaCodigo,
 } from '../../core/entities/xubio/clientes/XubioCliente';
 import { InternalApiKeyGuard } from '../guards/internal-api-key.guard';
+import { ApiInternalEndpoint } from '../modules/shared/swagger/internal-api-docs.decorators';
 import { XubioClientesService } from '../services/xubio-clientes.service';
 
+@ApiTags('Xubio - Clientes')
 @Controller('internal/xubio/clientes')
 @UseGuards(InternalApiKeyGuard)
 export class XubioClientesController {
   constructor(private readonly xubioClientesService: XubioClientesService) {}
 
+  @ApiInternalEndpoint()
+  @ApiOperation({
+    summary: 'Crear cliente Xubio desde datos fiscales',
+    description:
+      'Endpoint directo para crear cliente en Xubio cuando ya se tiene CUIT/CUIL, razón social y condición impositiva.',
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['cuit', 'razonSocial', 'condicionImpositiva'],
+      properties: {
+        tlqvCode: { type: 'string', example: 'TLQV-14921' },
+        cuit: { type: 'string', example: '20-42433388-4' },
+        documentoTipo: {
+          type: 'string',
+          enum: ['CUIT', 'CUIL'],
+          example: 'CUIT',
+        },
+        nombre: { type: 'string', example: 'ARTURO GUTIERREZ' },
+        razonSocial: { type: 'string', example: 'ARTURO GUTIERREZ' },
+        primerNombre: { type: 'string', example: 'ARTURO' },
+        primerApellido: { type: 'string', example: 'GUTIERREZ' },
+        condicionImpositiva: { type: 'string', example: 'MONOTRIBUTO' },
+        categoriaFiscalCodigo: {
+          type: 'string',
+          enum: ['MT', 'RI', 'CF', 'EX'],
+          example: 'MT',
+        },
+        direccion: { type: 'string', example: 'OBLIGADO 3645' },
+        codigoPostal: { type: 'string', example: '1661' },
+        provincia: { type: 'string', example: 'BUENOS AIRES' },
+        descripcion: {
+          type: 'string',
+          example: 'Cliente creado automáticamente desde TLQV',
+        },
+      },
+      example: {
+        tlqvCode: 'TLQV-14921',
+        cuit: '20-42433388-4',
+        documentoTipo: 'CUIT',
+        nombre: 'ARTURO GUTIERREZ',
+        razonSocial: 'ARTURO GUTIERREZ',
+        condicionImpositiva: 'MONOTRIBUTO',
+        direccion: 'OBLIGADO 3645',
+        codigoPostal: '1661',
+        provincia: 'BUENOS AIRES',
+      },
+    },
+  })
+  @ApiOkResponse({
+    description: 'Cliente creado o ya existente.',
+    schema: {
+      example: {
+        status: 'created',
+        created: true,
+        cliente: {
+          clienteId: 10256469,
+          nombre: 'ARTURO GUTIERREZ',
+          razonSocial: 'ARTURO GUTIERREZ',
+          cuit: '20-42433388-4',
+        },
+      },
+    },
+  })
   @Post()
   createCliente(
     @Body()

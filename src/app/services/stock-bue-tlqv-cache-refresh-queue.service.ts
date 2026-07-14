@@ -1,11 +1,20 @@
-import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnModuleDestroy,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Job, Queue, Worker, type JobsOptions } from 'bullmq';
 import type {
   RefreshStockBueTlqvCacheCommand,
   RefreshStockBueTlqvCacheResponse,
 } from '../../core/interactors/stock-bue/RefreshStockBueTlqvCacheInteractor';
-import { RedisConnectionOptionsFactory } from './redis/redis-connection-options.factory';
+import {
+  readErrorMessage,
+  waitUntilQueueReady,
+} from '../drivers/queue/wait-until-queue-ready';
+import { RedisConnectionOptionsFactory } from '../drivers/redis/redis-connection-options.factory';
 import { StockBueTlqvCacheRefreshService } from './stock-bue-tlqv-cache-refresh.service';
 
 export const STOCK_BUE_TLQV_CACHE_REFRESH_QUEUE_NAME =
@@ -13,6 +22,7 @@ export const STOCK_BUE_TLQV_CACHE_REFRESH_QUEUE_NAME =
 const STOCK_BUE_TLQV_CACHE_REFRESH_JOB_NAME = 'refresh';
 const STOCK_BUE_TLQV_CACHE_REFRESH_REPEAT_JOB_ID = 'stock-bue-tlqv-cache-cron';
 const DEFAULT_REFRESH_CRON = '0 3,15 * * *';
+const DEFAULT_QUEUE_READY_TIMEOUT_MS = 10_000;
 
 interface StockBueTlqvCacheRefreshJobData {
   command: RefreshStockBueTlqvCacheCommand;
@@ -68,7 +78,15 @@ export class StockBueTlqvCacheRefreshQueueService implements OnModuleDestroy {
     );
 
     this.registerWorkerLogging();
-    void this.registerCronJob();
+    void this.registerCronJob().catch((error: unknown) => {
+      this.logger.error(
+        `Stock BUE TLQV cache refresh cron registration failed ${JSON.stringify(
+          {
+            errorMessage: readErrorMessage(error),
+          },
+        )}`,
+      );
+    });
   }
 
   getQueue(): Queue<StockBueTlqvCacheRefreshJobData> {
@@ -78,7 +96,7 @@ export class StockBueTlqvCacheRefreshQueueService implements OnModuleDestroy {
   async enqueueManual(
     command: RefreshStockBueTlqvCacheCommand = {},
   ): Promise<EnqueueStockBueTlqvCacheRefreshResponse> {
-    await this.queue.waitUntilReady();
+    await this.waitUntilQueueReady();
 
     const job = await this.queue.add(STOCK_BUE_TLQV_CACHE_REFRESH_JOB_NAME, {
       command,
@@ -104,7 +122,7 @@ export class StockBueTlqvCacheRefreshQueueService implements OnModuleDestroy {
       return;
     }
 
-    await this.queue.waitUntilReady();
+    await this.waitUntilQueueReady();
     await this.queue.add(
       STOCK_BUE_TLQV_CACHE_REFRESH_JOB_NAME,
       {
@@ -193,6 +211,24 @@ export class StockBueTlqvCacheRefreshQueueService implements OnModuleDestroy {
         ),
       },
     };
+  }
+
+  private async waitUntilQueueReady(): Promise<void> {
+    try {
+      await waitUntilQueueReady(
+        this.queue,
+        this.readNumberConfig(
+          'STOCK_BUE_TLQV_CACHE_QUEUE_READY_TIMEOUT_MS',
+          DEFAULT_QUEUE_READY_TIMEOUT_MS,
+        ),
+      );
+    } catch (error: unknown) {
+      throw new ServiceUnavailableException(
+        `Stock BUE TLQV cache refresh queue is not ready. ${readErrorMessage(
+          error,
+        )}`,
+      );
+    }
   }
 
   private readOptionalConfig(name: string): string | undefined {

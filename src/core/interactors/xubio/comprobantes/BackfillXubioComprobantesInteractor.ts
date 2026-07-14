@@ -341,7 +341,25 @@ export class BackfillXubioComprobantesInteractor {
         firstTransactionId: pageDiagnostic.firstTransactionId,
         lastTransactionId: pageDiagnostic.lastTransactionId,
         shouldContinue: pageDiagnostic.shouldContinue,
+        stopReason: pageDiagnostic.stopReason ?? null,
       });
+
+      if (pageDiagnostic.stopReason !== undefined) {
+        this.logger.warn('Xubio comprobantes pagination stopped defensively', {
+          syncRunId,
+          fechaDesde: window.fechaDesde,
+          fechaHasta: window.fechaHasta,
+          page: pageDiagnostic.page,
+          requestedLimit: pageDiagnostic.requestedLimit,
+          requestedLastTransactionId: pageDiagnostic.requestedLastTransactionId,
+          received: pageDiagnostic.received,
+          uniqueAdded: pageDiagnostic.uniqueAdded,
+          duplicated: pageDiagnostic.duplicated,
+          firstTransactionId: pageDiagnostic.firstTransactionId,
+          lastTransactionId: pageDiagnostic.lastTransactionId,
+          stopReason: pageDiagnostic.stopReason,
+        });
+      }
     }
 
     this.logger.info('Xubio comprobantes day listed', {
@@ -873,8 +891,24 @@ function validateDateRange(fechaDesde: string, fechaHasta: string): void {
 }
 
 function validateIsoDate(value: string, field: string): void {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (match === null) {
     throw new RangeError(`${field} must use YYYY-MM-DD format`);
+  }
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  const isValidCalendarDate =
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day;
+
+  if (!isValidCalendarDate) {
+    throw new RangeError(
+      `${field} must be a valid calendar date in YYYY-MM-DD format`,
+    );
   }
 }
 

@@ -1,13 +1,13 @@
 import type { IInvoiceClientIssueRepository } from '../../adapters/repositories/invoice/client-issues/IInvoiceClientIssueRepository';
 import type { IStockBueTlqvCacheRepository } from '../../adapters/repositories/cache/stock-bue/IStockBueTlqvCacheRepository';
-import type { IGetFlokzuProcessInstanceRepository } from '../../adapters/repositories/flokzu/process-instance/IGetFlokzuProcessInstanceRepository';
 import type { IMadreXubioComprobantesRepository } from '../../adapters/repositories/madre-api/xubio/comprobantes/IMadreXubioComprobantesRepository';
+import type { IGetTlqvOrderDetailsRepository } from '../../adapters/repositories/tlqv/order-details/IGetTlqvOrderDetailsRepository';
 import type { IGetTusFacturasAfipInfoRepository } from '../../adapters/repositories/tus-facturas/afip-info/IGetTusFacturasAfipInfoRepository';
 import type { ICreateXubioClienteRepository } from '../../adapters/repositories/xubio/clientes/ICreateXubioClienteRepository';
 import type {
-  FlokzuBuyerData,
-  FlokzuProcessInstance,
-} from '../../entities/flokzu/process-instance/FlokzuProcessInstance';
+  TlqvOrderBuyerData,
+  TlqvOrderDetails,
+} from '../../entities/tlqv/order-details/TlqvOrderDetails';
 import type {
   GetTusFacturasAfipInfoResponse,
   TusFacturasAfipInfo,
@@ -28,6 +28,7 @@ export type CreateXubioClienteFromTlqvStatus =
 
 export type CreateXubioClienteFromTlqvBlockerCode =
   | PrepareTlqvInvoiceBlocker['code']
+  | 'ORDER_DETAILS_NOT_FOUND'
   | 'MISSING_BUYER_CUIT'
   | 'MISSING_FISCAL_RAZON_SOCIAL'
   | 'MISSING_FISCAL_CONDICION_IMPOSITIVA';
@@ -45,8 +46,8 @@ interface CreateXubioClienteFromTlqvBaseResponse {
   status: CreateXubioClienteFromTlqvStatus;
   tlqvCode: string;
   prepare: PrepareTlqvInvoiceResponse;
-  flokzuProcessInstance?: FlokzuProcessInstance;
-  buyerData?: FlokzuBuyerData;
+  orderDetails?: TlqvOrderDetails;
+  buyerData?: TlqvOrderBuyerData;
   fiscalInfoResponse?: GetTusFacturasAfipInfoResponse;
   documentoTipo?: TusFacturasDocumentoTipo;
 }
@@ -73,7 +74,7 @@ export class CreateXubioClienteFromTlqvInteractor {
   constructor(
     private readonly stockBueTlqvCacheRepository: IStockBueTlqvCacheRepository,
     private readonly madreXubioComprobantesRepository: IMadreXubioComprobantesRepository,
-    private readonly flokzuProcessInstanceRepository: IGetFlokzuProcessInstanceRepository,
+    private readonly orderDetailsRepositories: IGetTlqvOrderDetailsRepository[],
     private readonly tusFacturasAfipInfoRepository: IGetTusFacturasAfipInfoRepository,
     private readonly createXubioClienteRepository: ICreateXubioClienteRepository,
     private readonly invoiceClientIssueRepository?: IInvoiceClientIssueRepository,
@@ -99,12 +100,23 @@ export class CreateXubioClienteFromTlqvInteractor {
       };
     }
 
-    const flokzuProcessInstanceResponse =
-      await this.flokzuProcessInstanceRepository.getByIdentifier({
-        identifier: prepare.tlqvCode,
-      });
-    const flokzuProcessInstance = flokzuProcessInstanceResponse.processInstance;
-    const buyerData = flokzuProcessInstance.buyerData;
+    const orderDetails = await this.getOrderDetails(prepare.tlqvCode);
+    if (orderDetails === null) {
+      return {
+        status: 'blocked',
+        canContinue: false,
+        tlqvCode: prepare.tlqvCode,
+        prepare,
+        blockers: [
+          {
+            code: 'ORDER_DETAILS_NOT_FOUND',
+            message: `${prepare.tlqvCode} was not found in Ops API or Flokzu.`,
+          },
+        ],
+      };
+    }
+
+    const buyerData = orderDetails.buyerData;
     const cuitCompradorDigits = buyerData.cuitCompradorDigits;
 
     if (cuitCompradorDigits === undefined || cuitCompradorDigits === null) {
@@ -113,12 +125,12 @@ export class CreateXubioClienteFromTlqvInteractor {
         canContinue: false,
         tlqvCode: prepare.tlqvCode,
         prepare,
-        flokzuProcessInstance,
+        orderDetails,
         buyerData,
         blockers: [
           {
             code: 'MISSING_BUYER_CUIT',
-            message: `${prepare.tlqvCode} does not have CUITCOMPRADOR in Flokzu.`,
+            message: `${prepare.tlqvCode} does not have buyer CUIT in ${orderDetails.source}.`,
           },
         ],
       };
@@ -134,11 +146,17 @@ export class CreateXubioClienteFromTlqvInteractor {
       documentoNro: cuitCompradorDigits,
       documentoTipo,
       issueContext: {
-        saleNumber: prepare.stockBueItem?.saleNumber,
+        saleNumber: orderDetails.saleNumber ?? prepare.stockBueItem?.saleNumber,
         buyerName: buyerData.nombreDestinatario,
         email: buyerData.email,
         metadata: {
           source: 'create_xubio_cliente_from_tlqv',
+          orderDetailsSource: orderDetails.source,
+          orderDetails: {
+            tlqvCode: orderDetails.tlqvCode,
+            saleNumber: orderDetails.saleNumber,
+            source: orderDetails.source,
+          },
           stockBue: {
             rowNumber: prepare.stockBueItem?.rowNumber,
             instruction: prepare.stockBueItem?.instruction,
@@ -148,7 +166,7 @@ export class CreateXubioClienteFromTlqvInteractor {
             fechaLimite: prepare.stockBueItem?.fechaLimite,
             fechaInstruccion: prepare.stockBueItem?.fechaInstruccion,
           },
-          flokzuBuyerData: {
+          buyerData: {
             nombreDestinatario: buyerData.nombreDestinatario,
             direccion: buyerData.direccion,
             ciudad: buyerData.ciudad,
@@ -157,6 +175,18 @@ export class CreateXubioClienteFromTlqvInteractor {
             telefono: buyerData.telefono,
             email: buyerData.email,
           },
+          flokzuBuyerData:
+            orderDetails.source === 'flokzu'
+              ? {
+                  nombreDestinatario: buyerData.nombreDestinatario,
+                  direccion: buyerData.direccion,
+                  ciudad: buyerData.ciudad,
+                  provincia: buyerData.provincia,
+                  codigoPostal: buyerData.codigoPostal,
+                  telefono: buyerData.telefono,
+                  email: buyerData.email,
+                }
+              : undefined,
         },
       },
     });
@@ -167,7 +197,7 @@ export class CreateXubioClienteFromTlqvInteractor {
         canContinue: false,
         tlqvCode: prepare.tlqvCode,
         prepare,
-        flokzuProcessInstance,
+        orderDetails,
         buyerData,
         fiscalInfoResponse,
         documentoTipo,
@@ -186,7 +216,7 @@ export class CreateXubioClienteFromTlqvInteractor {
         canContinue: false,
         tlqvCode: prepare.tlqvCode,
         prepare,
-        flokzuProcessInstance,
+        orderDetails,
         buyerData,
         fiscalInfoResponse,
         documentoTipo,
@@ -215,13 +245,26 @@ export class CreateXubioClienteFromTlqvInteractor {
       canContinue: true,
       tlqvCode: prepare.tlqvCode,
       prepare,
-      flokzuProcessInstance,
+      orderDetails,
       buyerData,
       fiscalInfoResponse,
       fiscalInfo,
       documentoTipo,
       xubioClienteResult,
     };
+  }
+
+  private async getOrderDetails(
+    tlqvCode: string,
+  ): Promise<TlqvOrderDetails | null> {
+    for (const repository of this.orderDetailsRepositories) {
+      const response = await repository.getByTlqvCode({ tlqvCode });
+      if (response.found) {
+        return response.orderDetails;
+      }
+    }
+
+    return null;
   }
 }
 

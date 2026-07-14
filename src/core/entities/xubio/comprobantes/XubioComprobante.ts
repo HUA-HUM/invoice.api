@@ -91,6 +91,7 @@ export interface GetXubioComprobantesByDateCommand {
 }
 
 export interface XubioComprobantesPageDiagnostic {
+  stopReason?: 'duplicate_page' | 'missing_cursor' | 'repeated_cursor';
   page: number;
   requestedLimit: number;
   requestedLastTransactionId: number | null;
