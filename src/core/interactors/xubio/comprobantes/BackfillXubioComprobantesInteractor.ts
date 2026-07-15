@@ -15,7 +15,7 @@ const DEFAULT_FECHA_DESDE = '2025-01-01';
 const DEFAULT_XUBIO_LIMIT = 100;
 const DEFAULT_BATCH_SIZE = 10;
 const DEFAULT_WINDOW_SIZE_DAYS = 3;
-const MAX_XUBIO_LIMIT = 10_000;
+const MAX_XUBIO_LIMIT = 100;
 const MAX_BATCH_SIZE = 500;
 const MAX_WINDOW_SIZE_DAYS = 31;
 
@@ -130,10 +130,12 @@ interface Counters {
 
 export interface BackfillXubioComprobantesInteractorOptions {
   defaultXubioLimit?: number;
+  detailRequestDelayInMilliseconds?: number;
 }
 
 export class BackfillXubioComprobantesInteractor {
   private readonly defaultXubioLimit: number;
+  private readonly detailRequestDelayInMilliseconds: number;
 
   constructor(
     private readonly getComprobantesByDateRepository: IGetComprobantesByDateRepository,
@@ -146,6 +148,12 @@ export class BackfillXubioComprobantesInteractor {
     const defaultXubioLimit = options.defaultXubioLimit ?? DEFAULT_XUBIO_LIMIT;
     validateXubioLimit(defaultXubioLimit);
     this.defaultXubioLimit = defaultXubioLimit;
+    this.detailRequestDelayInMilliseconds =
+      options.detailRequestDelayInMilliseconds ?? 0;
+    validateNonNegativeInteger(
+      this.detailRequestDelayInMilliseconds,
+      'detailRequestDelayInMilliseconds',
+    );
   }
 
   async execute(
@@ -256,7 +264,7 @@ export class BackfillXubioComprobantesInteractor {
         });
       }
 
-      const status = saturatedWindows.length > 0 ? 'partial' : 'completed';
+      const status = getFinalSyncRunStatus(counters, saturatedWindows);
       await this.updateSyncRunProgress(
         syncRun.id,
         status,
@@ -382,7 +390,8 @@ export class BackfillXubioComprobantesInteractor {
   ): Promise<void> {
     let batch: MadreXubioComprobante[] = [];
 
-    for (const summary of summaries) {
+    for (let index = 0; index < summaries.length; index += 1) {
+      const summary = summaries[index];
       try {
         const summaryTlqv = extractTlqv(summary.descripcion);
         this.logger.info('Getting Xubio comprobante detail', {
@@ -420,12 +429,15 @@ export class BackfillXubioComprobantesInteractor {
           errorMessage:
             error instanceof Error ? error.message : 'Unknown error',
         });
-        continue;
       }
 
       if (batch.length >= batchSize) {
         await this.upsertBatch(syncRunId, batch, counters);
         batch = [];
+      }
+
+      if (index < summaries.length - 1) {
+        await this.waitBetweenDetailRequests();
       }
     }
 
@@ -526,7 +538,9 @@ export class BackfillXubioComprobantesInteractor {
         errorMessage ??
         (saturatedWindows.length > 0
           ? 'At least one daily Xubio window reached the limit and may be incomplete'
-          : null),
+          : counters.totalFailed > 0
+            ? 'At least one Xubio comprobante could not be synced after retries'
+            : null),
       finishedAt,
     });
 
@@ -541,6 +555,25 @@ export class BackfillXubioComprobantesInteractor {
       hasSaturatedWindows: saturatedWindows.length > 0,
     });
   }
+
+  private async waitBetweenDetailRequests(): Promise<void> {
+    if (this.detailRequestDelayInMilliseconds <= 0) {
+      return;
+    }
+
+    await wait(this.detailRequestDelayInMilliseconds);
+  }
+}
+
+function getFinalSyncRunStatus(
+  counters: Counters,
+  saturatedWindows: DateWindow[],
+): 'completed' | 'partial' {
+  if (saturatedWindows.length > 0 || counters.totalFailed > 0) {
+    return 'partial';
+  }
+
+  return 'completed';
 }
 
 function mapToMadreComprobante(
@@ -931,7 +964,7 @@ function validateWindowSizeDays(value: number): void {
 function validateXubioLimit(value: number): void {
   if (!Number.isInteger(value) || value < 1 || value > MAX_XUBIO_LIMIT) {
     throw new RangeError(
-      `xubioLimit must be an integer between 1 and ${MAX_XUBIO_LIMIT}`,
+      `xubioLimit must be an integer between 1 and ${MAX_XUBIO_LIMIT}. Xubio comprobantes pagination is only reliable with limit <= ${MAX_XUBIO_LIMIT}`,
     );
   }
 }
@@ -946,6 +979,12 @@ function validateOptionalSyncRunId(value: number | undefined): void {
   }
 }
 
+function validateNonNegativeInteger(value: number, field: string): void {
+  if (!Number.isInteger(value) || value < 0) {
+    throw new RangeError(`${field} must be a non-negative integer`);
+  }
+}
+
 function parseDate(value: string): Date {
   return new Date(`${value}T00:00:00.000Z`);
 }
@@ -956,4 +995,12 @@ function formatDate(value: Date): string {
 
 function addDays(value: Date, days: number): Date {
   return new Date(value.getTime() + days * 24 * 60 * 60 * 1000);
+}
+
+function wait(milliseconds: number): Promise<void> {
+  if (milliseconds <= 0) {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }

@@ -116,6 +116,29 @@ describe('GetComprobanteDetailRepository', () => {
 
     expect(result.comprobante.transaccionCobranzaItems[0]?.cuentaId).toBe(0);
   });
+
+  it('accepts old Xubio details without descripcion', async () => {
+    const detail = createComprobanteDetail();
+    delete (detail as Record<string, unknown>).descripcion;
+    detail.transaccionProductoItems[0].descripcion = null as unknown as string;
+    detail.transaccionCobranzaItems[0].descripcion = null as unknown as string;
+    const get = jest.fn().mockResolvedValue({
+      data: detail,
+    });
+    const repository = new GetComprobanteDetailRepository({
+      httpClient: { get } as unknown as AxiosInstance,
+    });
+
+    const result = await repository.getDetail({ transaccionId: 54231396 });
+
+    expect(result.comprobante.descripcion).toBe('');
+    expect(result.comprobante.transaccionProductoItems[0]?.descripcion).toBe(
+      '',
+    );
+    expect(result.comprobante.transaccionCobranzaItems[0]?.descripcion).toBe(
+      '',
+    );
+  });
 });
 
 function createAxiosError(status: number) {

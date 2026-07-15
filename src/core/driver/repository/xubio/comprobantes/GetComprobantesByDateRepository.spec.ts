@@ -88,6 +88,22 @@ describe('GetComprobantesByDateRepository', () => {
     expect(get).not.toHaveBeenCalled();
   });
 
+  it('rejects limits greater than 100 before calling Xubio', async () => {
+    const get = jest.fn();
+    const repository = new GetComprobantesByDateRepository({
+      httpClient: { get } as unknown as AxiosInstance,
+    });
+
+    await expect(
+      repository.getByDateRange({
+        fechaDesde: '2025-01-01',
+        fechaHasta: '2025-01-01',
+        limit: 1000,
+      }),
+    ).rejects.toThrow('limit must be an integer between 1 and 100');
+    expect(get).not.toHaveBeenCalled();
+  });
+
   it('paginates Xubio comprobantes with lastTransactionID header', async () => {
     const firstPage = Array.from({ length: 100 }, (_, index) =>
       createComprobanteSummary(index + 1),

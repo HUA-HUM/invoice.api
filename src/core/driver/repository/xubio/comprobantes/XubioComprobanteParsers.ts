@@ -27,7 +27,7 @@ export function parseComprobanteSummary(
     rawPayload: value,
     externalId: readOptionalNullableString(value, 'externalId'),
     numeroDocumento: readOptionalNullableString(value, 'numeroDocumento'),
-    descripcion: readString(value, 'descripcion'),
+    descripcion: readOptionalStringLenient(value, 'descripcion') ?? '',
     fecha: readString(value, 'fecha'),
     fechaVto: readOptionalNullableString(value, 'fechaVto'),
     importeGravado: readNumber(value, 'importeGravado'),
@@ -163,7 +163,7 @@ function parseProductItem(
     rawPayload: value,
     transaccionCVItemId: readPositiveInteger(value, 'transaccionCVItemId'),
     importe: readNumber(value, 'importe'),
-    descripcion: readString(value, 'descripcion'),
+    descripcion: readOptionalStringLenient(value, 'descripcion') ?? '',
     cantidad: readNumber(value, 'cantidad'),
     precio: readNumber(value, 'precio'),
     producto: parseReference(value.producto, `${path}.producto`),
@@ -195,7 +195,7 @@ function parseCobranzaItem(
     cotizacionMonTransaccion: readNumber(value, 'cotizacionMonTransaccion'),
     importeMonPrincipal: readNumber(value, 'importeMonPrincipal'),
     importeMonTransaccion: readNumber(value, 'importeMonTransaccion'),
-    descripcion: readString(value, 'descripcion'),
+    descripcion: readOptionalStringLenient(value, 'descripcion') ?? '',
   };
 }
 

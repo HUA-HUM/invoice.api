@@ -18,6 +18,7 @@ import { createMadreXubioComprobantesRepository } from '../../shared/madre/madre
 import { readXubioRetryOptions } from '../shared/xubio-cliente-repository.factory';
 
 const DEFAULT_XUBIO_COMPROBANTES_LIST_LIMIT = 100;
+const DEFAULT_XUBIO_COMPROBANTES_DETAIL_REQUEST_DELAY_MS = 250;
 
 export const MADRE_XUBIO_COMPROBANTES_REPOSITORY = Symbol(
   'MADRE_XUBIO_COMPROBANTES_REPOSITORY',
@@ -89,7 +90,14 @@ export const xubioComprobantesProviders: Provider[] = [
         madreXubioComprobantesRepository,
         () => new Date(),
         createBackfillLogger(),
-        { defaultXubioLimit },
+        {
+          defaultXubioLimit,
+          detailRequestDelayInMilliseconds: readNumberConfig(
+            configService,
+            'XUBIO_COMPROBANTES_DETAIL_REQUEST_DELAY_MS',
+            DEFAULT_XUBIO_COMPROBANTES_DETAIL_REQUEST_DELAY_MS,
+          ),
+        },
       );
     },
   },

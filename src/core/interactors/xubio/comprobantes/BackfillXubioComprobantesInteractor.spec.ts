@@ -48,6 +48,18 @@ describe('BackfillXubioComprobantesInteractor', () => {
     ).toThrow('fechaDesde must be a valid calendar date in YYYY-MM-DD format');
   });
 
+  it('rejects Xubio list limits greater than 100 to keep pagination reliable', () => {
+    expect(() =>
+      normalizeBackfillXubioComprobantesCommand({
+        fechaDesde: '2025-01-01',
+        fechaHasta: '2025-01-01',
+        xubioLimit: 1000,
+      }),
+    ).toThrow(
+      'xubioLimit must be an integer between 1 and 100. Xubio comprobantes pagination is only reliable with limit <= 100',
+    );
+  });
+
   it('gets summaries, gets details and upserts them in Madre API', async () => {
     const summary = createSummary(54231396);
     const detail = createDetail(54231396);
@@ -105,6 +117,10 @@ describe('BackfillXubioComprobantesInteractor', () => {
       })
       .mockResolvedValueOnce({ comprobantes: [] });
     const getDetailRepository = createGetDetailRepository();
+    getDetailRepository.getDetail.mockImplementation(
+      ({ transaccionId }: { transaccionId: number }) =>
+        Promise.resolve({ comprobante: createDetail(transaccionId) }),
+    );
     const madreRepository = createMadreRepository();
     const interactor = new BackfillXubioComprobantesInteractor(
       getByDateRangeRepository,
@@ -137,11 +153,15 @@ describe('BackfillXubioComprobantesInteractor', () => {
   it('uses the configured Xubio list limit', async () => {
     const getByDateRangeRepository = createGetByDateRangeRepository();
     getByDateRangeRepository.getByDateRange.mockResolvedValue({
-      comprobantes: Array.from({ length: 250 }, (_, index) =>
+      comprobantes: Array.from({ length: 50 }, (_, index) =>
         createSummary(index + 1),
       ),
     });
     const getDetailRepository = createGetDetailRepository();
+    getDetailRepository.getDetail.mockImplementation(
+      ({ transaccionId }: { transaccionId: number }) =>
+        Promise.resolve({ comprobante: createDetail(transaccionId) }),
+    );
     const madreRepository = createMadreRepository();
     const interactor = new BackfillXubioComprobantesInteractor(
       getByDateRangeRepository,
@@ -149,7 +169,7 @@ describe('BackfillXubioComprobantesInteractor', () => {
       madreRepository,
       () => new Date('2025-01-01T12:00:00.000Z'),
       undefined,
-      { defaultXubioLimit: 250 },
+      { defaultXubioLimit: 50 },
     );
 
     const result = await interactor.execute({
@@ -160,9 +180,9 @@ describe('BackfillXubioComprobantesInteractor', () => {
     expect(getByDateRangeRepository.getByDateRange).toHaveBeenCalledWith({
       fechaDesde: '2025-01-01',
       fechaHasta: '2025-01-01',
-      limit: 250,
+      limit: 50,
     });
-    expect(result.xubioLimit).toBe(250);
+    expect(result.xubioLimit).toBe(50);
     expect(result.saturatedWindows).toEqual([]);
     expect(result.status).toBe('completed');
   });
@@ -204,6 +224,40 @@ describe('BackfillXubioComprobantesInteractor', () => {
         }),
       ],
     });
+  });
+
+  it('marks the sync run as partial when detail requests fail after retries', async () => {
+    const getByDateRangeRepository = createGetByDateRangeRepository();
+    getByDateRangeRepository.getByDateRange.mockResolvedValue({
+      comprobantes: [createSummary(74207488)],
+    });
+    const getDetailRepository = createGetDetailRepository();
+    getDetailRepository.getDetail.mockRejectedValue(new Error('Xubio 504'));
+    const madreRepository = createMadreRepository();
+    const interactor = new BackfillXubioComprobantesInteractor(
+      getByDateRangeRepository,
+      getDetailRepository,
+      madreRepository,
+      () => new Date('2026-05-20T12:00:00.000Z'),
+    );
+
+    const result = await interactor.execute({
+      fechaDesde: '2026-05-20',
+      fechaHasta: '2026-05-20',
+      batchSize: 1,
+    });
+
+    expect(result.status).toBe('partial');
+    expect(result.totalFailed).toBe(1);
+    expect(madreRepository.upsertBatch).not.toHaveBeenCalled();
+    expect(madreRepository.updateSyncRun).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        status: 'partial',
+        totalFailed: 1,
+        errorMessage:
+          'At least one Xubio comprobante could not be synced after retries',
+      }),
+    );
   });
 
   it('updates sync progress after each batch window', async () => {

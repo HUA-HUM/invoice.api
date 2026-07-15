@@ -61,7 +61,9 @@ export class XubioComprobantesBackfillController {
         xubioLimit: {
           type: 'number',
           example: 100,
-          description: 'Header limit para listado Xubio minimalVersion.',
+          maximum: 100,
+          description:
+            'Header limit para listado Xubio minimalVersion. Usar máximo 100; valores mayores hacen inestable el paginado de Xubio.',
         },
       },
       example: {

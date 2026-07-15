@@ -41,17 +41,17 @@ export function readXubioRetryOptions(
     maxAttempts: readNumberConfig(
       configService,
       'XUBIO_REQUEST_RETRY_ATTEMPTS',
-      4,
+      6,
     ),
     initialDelayInMilliseconds: readNumberConfig(
       configService,
       'XUBIO_REQUEST_RETRY_INITIAL_DELAY_MS',
-      1_000,
+      2_000,
     ),
     maxDelayInMilliseconds: readNumberConfig(
       configService,
       'XUBIO_REQUEST_RETRY_MAX_DELAY_MS',
-      10_000,
+      30_000,
     ),
   };
 }

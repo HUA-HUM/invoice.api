@@ -17,8 +17,7 @@ import {
 const DEFAULT_BASE_URL = 'https://xubio.com';
 const DEFAULT_TIMEOUT_IN_MILLISECONDS = 20_000;
 const DEFAULT_LIMIT = 100;
-const MAX_LIMIT = 10_000;
-const MINIMUM_PAGE_SIZE_TO_PROBE_NEXT_PAGE = 100;
+const MAX_LIMIT = 100;
 const MAX_PAGES_PER_DATE_RANGE = 1_000;
 const COMPROBANTE_VENTA_PATH = '/API/1.1/comprobanteVentaBean';
 
@@ -120,8 +119,7 @@ export class GetComprobantesByDateRepository implements IGetComprobantesByDateRe
           parseComprobanteListItem(item, `comprobantes[${index}]`),
         );
         const nextTransactionId = page[page.length - 1]?.transaccionid;
-        const pageCanHaveNextPage =
-          page.length >= Math.min(limit, MINIMUM_PAGE_SIZE_TO_PROBE_NEXT_PAGE);
+        const pageCanHaveNextPage = page.length >= limit;
         let uniqueAdded = 0;
         let duplicated = 0;
 
