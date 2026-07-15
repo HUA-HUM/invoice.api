@@ -121,8 +121,8 @@ describe('GetComprobantesByDateRepository', () => {
     });
 
     const result = await repository.getByDateRange({
-      fechaDesde: '2025-01-01',
-      fechaHasta: '2025-01-01',
+      fechaDesde: '2025-01-29',
+      fechaHasta: '2025-01-29',
       limit: 100,
     });
 
@@ -192,8 +192,8 @@ describe('GetComprobantesByDateRepository', () => {
     });
 
     const result = await repository.getByDateRange({
-      fechaDesde: '2025-01-01',
-      fechaHasta: '2025-01-01',
+      fechaDesde: '2025-01-29',
+      fechaHasta: '2025-01-29',
       limit: 100,
     });
 
@@ -231,8 +231,8 @@ describe('GetComprobantesByDateRepository', () => {
     });
 
     const result = await repository.getByDateRange({
-      fechaDesde: '2025-01-01',
-      fechaHasta: '2025-01-01',
+      fechaDesde: '2025-01-29',
+      fechaHasta: '2025-01-29',
       limit: 100,
     });
 
@@ -248,6 +248,46 @@ describe('GetComprobantesByDateRepository', () => {
       duplicated: 100,
       firstTransactionId: 1,
       lastTransactionId: 99,
+      shouldContinue: false,
+    });
+  });
+
+  it('filters out comprobantes outside the requested date range and stops pagination', async () => {
+    const inRangePage = Array.from({ length: 100 }, (_, index) =>
+      createComprobanteSummary(index + 1, '2026-03-23'),
+    );
+    const outOfRangePage = Array.from({ length: 100 }, (_, index) =>
+      createComprobanteSummary(index + 101, '2026-03-22'),
+    );
+    const get = jest
+      .fn()
+      .mockResolvedValueOnce({ data: inRangePage })
+      .mockResolvedValueOnce({ data: outOfRangePage });
+    const repository = new GetComprobantesByDateRepository({
+      httpClient: { get } as unknown as AxiosInstance,
+    });
+
+    const result = await repository.getByDateRange({
+      fechaDesde: '2026-03-23',
+      fechaHasta: '2026-03-23',
+      limit: 100,
+    });
+
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(result.comprobantes).toHaveLength(100);
+    expect(
+      result.comprobantes.every((item) => item.fecha === '2026-03-23'),
+    ).toBe(true);
+    expect(result.pageDiagnostics[1]).toEqual({
+      stopReason: 'out_of_date_range',
+      page: 2,
+      requestedLimit: 100,
+      requestedLastTransactionId: 100,
+      received: 100,
+      uniqueAdded: 0,
+      duplicated: 0,
+      firstTransactionId: 101,
+      lastTransactionId: 200,
       shouldContinue: false,
     });
   });
@@ -346,11 +386,14 @@ function createAxiosError(status: number) {
   };
 }
 
-export function createComprobanteSummary(transaccionid = 54231396) {
+export function createComprobanteSummary(
+  transaccionid = 54231396,
+  fecha = '2025-01-29',
+) {
   return {
     numeroDocumento: 'B-00005-00000616',
     descripcion: 'TLQV-237\nExprimidor Lento Hurom Hz, Plateado',
-    fecha: '2025-01-29',
+    fecha,
     importeGravado: 1332225.01,
     importeImpuestos: 0,
     importetotal: 1332225.01,

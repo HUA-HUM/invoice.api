@@ -118,8 +118,19 @@ export class GetComprobantesByDateRepository implements IGetComprobantesByDateRe
         const page = response.data.map((item, index) =>
           parseComprobanteListItem(item, `comprobantes[${index}]`),
         );
+        const inRangePage = page.filter((comprobante) =>
+          isComprobanteInsideDateRange(
+            comprobante.fecha,
+            command.fechaDesde,
+            command.fechaHasta,
+          ),
+        );
         const nextTransactionId = page[page.length - 1]?.transaccionid;
         const pageCanHaveNextPage = page.length >= limit;
+        const pageHasNoInRangeItems = inRangePage.length === 0;
+        const pageReachedEndOfDateRange = page.some((comprobante) =>
+          isComprobanteBeforeDateRange(comprobante.fecha, command.fechaDesde),
+        );
         let uniqueAdded = 0;
         let duplicated = 0;
 
@@ -144,7 +155,7 @@ export class GetComprobantesByDateRepository implements IGetComprobantesByDateRe
           };
         }
 
-        for (const comprobante of page) {
+        for (const comprobante of inRangePage) {
           if (!seenTransactionIds.has(comprobante.transaccionid)) {
             comprobantes.push(comprobante);
             seenTransactionIds.add(comprobante.transaccionid);
@@ -157,6 +168,8 @@ export class GetComprobantesByDateRepository implements IGetComprobantesByDateRe
         const stopReason = getStopReason({
           nextTransactionId,
           pageCanHaveNextPage,
+          pageHasNoInRangeItems,
+          pageReachedEndOfDateRange,
           seenCursorIds,
           uniqueAdded,
         });
@@ -227,9 +240,15 @@ export class GetComprobantesByDateRepository implements IGetComprobantesByDateRe
 function getStopReason(command: {
   nextTransactionId: number | undefined;
   pageCanHaveNextPage: boolean;
+  pageHasNoInRangeItems: boolean;
+  pageReachedEndOfDateRange: boolean;
   seenCursorIds: Set<number>;
   uniqueAdded: number;
 }): XubioComprobantesPageDiagnostic['stopReason'] | null {
+  if (command.pageHasNoInRangeItems || command.pageReachedEndOfDateRange) {
+    return 'out_of_date_range';
+  }
+
   if (!command.pageCanHaveNextPage) {
     return null;
   }
@@ -247,6 +266,29 @@ function getStopReason(command: {
   }
 
   return null;
+}
+
+function isComprobanteInsideDateRange(
+  fecha: string,
+  fechaDesde: string,
+  fechaHasta: string,
+): boolean {
+  if (!isIsoDate(fecha)) {
+    return true;
+  }
+
+  return fecha >= fechaDesde && fecha <= fechaHasta;
+}
+
+function isComprobanteBeforeDateRange(
+  fecha: string,
+  fechaDesde: string,
+): boolean {
+  return isIsoDate(fecha) && fecha < fechaDesde;
+}
+
+function isIsoDate(value: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value);
 }
 
 function buildRequestError(
