@@ -292,6 +292,59 @@ describe('GetComprobantesByDateRepository', () => {
     });
   });
 
+  it('continues pagination when the first full pages are newer than the requested date range', async () => {
+    const newerPage = Array.from({ length: 100 }, (_, index) =>
+      createComprobanteSummary(index + 1, '2026-03-24'),
+    );
+    const inRangePage = [
+      createComprobanteSummary(101, '2026-03-23'),
+      createComprobanteSummary(102, '2026-03-23'),
+    ];
+    const get = jest
+      .fn()
+      .mockResolvedValueOnce({ data: newerPage })
+      .mockResolvedValueOnce({ data: inRangePage });
+    const repository = new GetComprobantesByDateRepository({
+      httpClient: { get } as unknown as AxiosInstance,
+    });
+
+    const result = await repository.getByDateRange({
+      fechaDesde: '2026-03-23',
+      fechaHasta: '2026-03-23',
+      limit: 100,
+    });
+
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(result.comprobantes).toHaveLength(2);
+    expect(
+      result.comprobantes.every((item) => item.fecha === '2026-03-23'),
+    ).toBe(true);
+    expect(result.pageDiagnostics).toEqual([
+      {
+        page: 1,
+        requestedLimit: 100,
+        requestedLastTransactionId: null,
+        received: 100,
+        uniqueAdded: 0,
+        duplicated: 0,
+        firstTransactionId: 1,
+        lastTransactionId: 100,
+        shouldContinue: true,
+      },
+      {
+        page: 2,
+        requestedLimit: 100,
+        requestedLastTransactionId: 100,
+        received: 2,
+        uniqueAdded: 2,
+        duplicated: 0,
+        firstTransactionId: 101,
+        lastTransactionId: 102,
+        shouldContinue: false,
+      },
+    ]);
+  });
+
   it('accepts minimal Xubio list responses', async () => {
     const get = jest.fn().mockResolvedValue({
       data: [{ transaccionid: 54231396 }],

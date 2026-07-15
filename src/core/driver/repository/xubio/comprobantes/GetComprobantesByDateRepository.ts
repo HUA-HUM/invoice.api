@@ -245,12 +245,12 @@ function getStopReason(command: {
   seenCursorIds: Set<number>;
   uniqueAdded: number;
 }): XubioComprobantesPageDiagnostic['stopReason'] | null {
-  if (command.pageHasNoInRangeItems || command.pageReachedEndOfDateRange) {
+  if (command.pageReachedEndOfDateRange) {
     return 'out_of_date_range';
   }
 
   if (!command.pageCanHaveNextPage) {
-    return null;
+    return command.pageHasNoInRangeItems ? 'out_of_date_range' : null;
   }
 
   if (command.nextTransactionId === undefined) {
@@ -261,7 +261,7 @@ function getStopReason(command: {
     return 'repeated_cursor';
   }
 
-  if (command.uniqueAdded === 0) {
+  if (command.uniqueAdded === 0 && !command.pageHasNoInRangeItems) {
     return 'duplicate_page';
   }
 
