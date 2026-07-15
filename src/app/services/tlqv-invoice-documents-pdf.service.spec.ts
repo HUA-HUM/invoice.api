@@ -13,6 +13,49 @@ describe('TlqvInvoiceDocumentsPdfService', () => {
     expect(buffer.subarray(0, 5).toString()).toBe('%PDF-');
     expect(buffer.length).toBeGreaterThan(1000);
   });
+
+  it('fetches and embeds the catalog product thumbnail when available', async () => {
+    const originalFetch = global.fetch;
+    const imageBuffer = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=',
+      'base64',
+    );
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      headers: {
+        get: (name: string) =>
+          name.toLowerCase() === 'content-type' ? 'image/png' : null,
+      },
+      arrayBuffer: async () =>
+        imageBuffer.buffer.slice(
+          imageBuffer.byteOffset,
+          imageBuffer.byteOffset + imageBuffer.byteLength,
+        ),
+    }) as unknown as typeof fetch;
+    const service = new TlqvInvoiceDocumentsPdfService({
+      get: jest.fn(),
+    } as unknown as ConfigService);
+
+    try {
+      const buffer = await service.generateCombinedPdf({
+        ...createDocumentData(),
+        catalogProductDetails: {
+          ...createDocumentData().catalogProductDetails!,
+          thumbnail: 'https://images.example.test/product.png',
+        },
+      });
+
+      expect(buffer.subarray(0, 5).toString()).toBe('%PDF-');
+      expect(global.fetch).toHaveBeenCalledWith(
+        'https://images.example.test/product.png',
+        expect.objectContaining({
+          signal: expect.any(AbortSignal),
+        }),
+      );
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
 });
 
 function createDocumentData(): TlqvInvoiceDocumentsData {
