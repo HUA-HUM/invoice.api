@@ -21,9 +21,13 @@ export class TlqvInvoiceDocumentsService {
   ): Promise<TlqvInvoiceDocumentsPdfResult> {
     const data = await this.interactor.execute({ tlqvCode });
     const buffer = await this.pdfService.generateCombinedPdf(data);
+    const documentName =
+      data.orderDetails != null && data.catalogProductDetails != null
+        ? 'factura-remito'
+        : 'factura';
 
     return {
-      filename: `${data.tlqvCode}-factura-remito.pdf`,
+      filename: `${data.tlqvCode}-${documentName}.pdf`,
       buffer,
     };
   }

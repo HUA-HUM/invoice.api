@@ -56,6 +56,84 @@ describe('TlqvInvoiceDocumentsPdfService', () => {
       global.fetch = originalFetch;
     }
   });
+
+  it('does not fetch product images or add remito content when external order data is missing', async () => {
+    const originalFetch = global.fetch;
+    global.fetch = jest.fn() as unknown as typeof fetch;
+    const service = new TlqvInvoiceDocumentsPdfService({
+      get: jest.fn(),
+    } as unknown as ConfigService);
+
+    try {
+      const buffer = await service.generateCombinedPdf({
+        ...createDocumentData(),
+        orderDetails: null,
+        catalogProductDetails: null,
+      });
+
+      expect(buffer.subarray(0, 5).toString()).toBe('%PDF-');
+      expect(global.fetch).not.toHaveBeenCalled();
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  it('uses a MercadoLibre JPG candidate when the catalog thumbnail is WEBP', async () => {
+    const originalFetch = global.fetch;
+    const imageBuffer = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=',
+      'base64',
+    );
+    global.fetch = jest
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        headers: {
+          get: (name: string) =>
+            name.toLowerCase() === 'content-type' ? 'image/webp' : null,
+        },
+        arrayBuffer: async () => new ArrayBuffer(0),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        headers: {
+          get: (name: string) =>
+            name.toLowerCase() === 'content-type' ? 'image/jpeg' : null,
+        },
+        arrayBuffer: async () =>
+          imageBuffer.buffer.slice(
+            imageBuffer.byteOffset,
+            imageBuffer.byteOffset + imageBuffer.byteLength,
+          ),
+      }) as unknown as typeof fetch;
+    const service = new TlqvInvoiceDocumentsPdfService({
+      get: jest.fn(),
+    } as unknown as ConfigService);
+
+    try {
+      await service.generateCombinedPdf({
+        ...createDocumentData(),
+        catalogProductDetails: {
+          ...createDocumentData().catalogProductDetails!,
+          thumbnail:
+            'http://http2.mlstatic.com/D_877463-MLA107044472824_022026-I.webp',
+        },
+      });
+
+      expect(global.fetch).toHaveBeenNthCalledWith(
+        1,
+        'https://http2.mlstatic.com/D_877463-MLA107044472824_022026-I.webp',
+        expect.any(Object),
+      );
+      expect(global.fetch).toHaveBeenNthCalledWith(
+        2,
+        'https://http2.mlstatic.com/D_877463-MLA107044472824_022026-I.jpg',
+        expect.any(Object),
+      );
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
 });
 
 function createDocumentData(): TlqvInvoiceDocumentsData {

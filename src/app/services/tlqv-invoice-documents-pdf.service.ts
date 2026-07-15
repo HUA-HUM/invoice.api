@@ -9,23 +9,23 @@ const PAGE_MARGIN = 36;
 const TABLE_BORDER_COLOR = '#222222';
 const LIGHT_BORDER_COLOR = '#cccccc';
 const HEADER_FILL_COLOR = '#f1f1f1';
+const BRAND_COLOR = '#111827';
+const ACCENT_COLOR = '#0f766e';
+const SOFT_ACCENT_COLOR = '#ecfdf5';
+const SOFT_GRAY_COLOR = '#f8fafc';
 const PRODUCT_IMAGE_MAX_BYTES = 2_000_000;
 const PRODUCT_IMAGE_TIMEOUT_MS = 4_000;
-const DEFAULT_LOGO_PATH = join(
-  process.cwd(),
-  'assets',
-  'branding',
-  'tienda-logo-navbar.png',
-);
+const LOGO_RELATIVE_PATH = join('assets', 'branding', 'tienda-logo-navbar.png');
 
 @Injectable()
 export class TlqvInvoiceDocumentsPdfService {
   constructor(private readonly configService: ConfigService) {}
 
   async generateCombinedPdf(data: TlqvInvoiceDocumentsData): Promise<Buffer> {
-    const productImage = await this.loadProductImage(
-      data.catalogProductDetails?.thumbnail,
-    );
+    const includeDeliveryNote = shouldIncludeDeliveryNote(data);
+    const productImage = includeDeliveryNote
+      ? await this.loadProductImage(data.catalogProductDetails?.thumbnail)
+      : null;
 
     return new Promise<Buffer>((resolve, reject) => {
       const doc = new PDFDocument({
@@ -45,8 +45,10 @@ export class TlqvInvoiceDocumentsPdfService {
       doc.on('error', reject);
 
       this.drawInvoicePage(doc, data);
-      doc.addPage();
-      this.drawDeliveryNotePage(doc, data, productImage);
+      if (includeDeliveryNote) {
+        doc.addPage();
+        this.drawDeliveryNotePage(doc, data, productImage);
+      }
       this.drawPageFooters(doc);
       doc.end();
     });
@@ -59,37 +61,46 @@ export class TlqvInvoiceDocumentsPdfService {
       return null;
     }
 
-    const normalizedUrl = url.trim();
-    if (!/^https?:\/\//i.test(normalizedUrl)) {
+    const normalizedUrl = normalizeHttpImageUrl(url);
+    if (normalizedUrl === null) {
       return null;
     }
 
-    try {
-      const response = await fetch(normalizedUrl, {
-        signal: AbortSignal.timeout(PRODUCT_IMAGE_TIMEOUT_MS),
-      });
-      if (!response.ok) {
-        return null;
-      }
+    for (const imageUrl of buildProductImageUrlCandidates(normalizedUrl)) {
+      try {
+        const response = await fetch(imageUrl, {
+          signal: AbortSignal.timeout(PRODUCT_IMAGE_TIMEOUT_MS),
+        });
+        if (!response.ok) {
+          continue;
+        }
 
-      const contentType = response.headers.get('content-type') ?? '';
-      if (!contentType.toLowerCase().startsWith('image/')) {
-        return null;
-      }
+        const contentType = response.headers.get('content-type') ?? '';
+        if (!isPdfKitSupportedImageContentType(contentType)) {
+          continue;
+        }
 
-      const contentLength = response.headers.get('content-length');
-      if (
-        contentLength !== null &&
-        Number(contentLength) > PRODUCT_IMAGE_MAX_BYTES
-      ) {
-        return null;
-      }
+        const contentLength = response.headers.get('content-length');
+        if (
+          contentLength !== null &&
+          Number(contentLength) > PRODUCT_IMAGE_MAX_BYTES
+        ) {
+          continue;
+        }
 
-      const image = Buffer.from(await response.arrayBuffer());
-      return image.length > PRODUCT_IMAGE_MAX_BYTES ? null : image;
-    } catch {
-      return null;
+        const image = Buffer.from(await response.arrayBuffer());
+        if (
+          image.length <= PRODUCT_IMAGE_MAX_BYTES &&
+          isPdfKitSupportedImageBuffer(image)
+        ) {
+          return image;
+        }
+      } catch {
+        continue;
+      }
     }
+
+    return null;
   }
 
   private drawInvoicePage(
@@ -218,24 +229,50 @@ export class TlqvInvoiceDocumentsPdfService {
     const { comprobante, orderDetails, catalogProductDetails } = data;
     this.drawBrandHeader(doc, 'REMITO / DETALLE DE ORDEN');
 
-    const top = 104;
-    drawSectionTitle(doc, 'Datos principales', PAGE_MARGIN, top);
-    drawKeyValueGrid(
+    const heroTop = 106;
+    drawFilledBox(doc, PAGE_MARGIN, heroTop, 523, 76, SOFT_ACCENT_COLOR);
+    drawBox(doc, PAGE_MARGIN, heroTop, 523, 76, '#99f6e4');
+    writeText(doc, data.tlqvCode, PAGE_MARGIN + 16, heroTop + 16, 140, {
+      font: 'Helvetica-Bold',
+      fontSize: 22,
+      color: BRAND_COLOR,
+    });
+    writeText(
       doc,
-      [
-        ['TLQV', data.tlqvCode],
-        ['Factura', comprobante.numeroDocumento ?? '-'],
-        ['Fecha factura', formatDate(comprobante.fechaEmision)],
-        ['Orden ML', comprobante.mlOrderId ?? orderDetails?.saleNumber ?? '-'],
-        ['Estado orden', orderDetails?.statuses?.estadoVbi ?? '-'],
-        ['SKU', orderDetails?.product?.sku ?? '-'],
-      ],
-      PAGE_MARGIN,
-      top + 22,
-      523,
+      `Orden ML: ${comprobante.mlOrderId ?? orderDetails?.saleNumber ?? '-'}`,
+      PAGE_MARGIN + 16,
+      heroTop + 46,
+      220,
+      {
+        fontSize: 9,
+        color: '#334155',
+      },
+    );
+    drawPill(
+      doc,
+      orderDetails?.statuses?.estadoVbi ?? 'SIN ESTADO',
+      PAGE_MARGIN + 398,
+      heroTop + 16,
+      108,
+    );
+    writeText(
+      doc,
+      `Factura ${comprobante.numeroDocumento ?? '-'} - ${formatDate(comprobante.fechaEmision)}`,
+      PAGE_MARGIN + 280,
+      heroTop + 48,
+      226,
+      {
+        fontSize: 8,
+        color: '#334155',
+        align: 'right',
+      },
     );
 
-    const buyerTop = top + 116;
+    const productTop = 202;
+    drawSectionTitle(doc, 'Producto vendido', PAGE_MARGIN, productTop);
+    drawProductCard(doc, data, productImage, productTop + 22);
+
+    const buyerTop = productTop + 184;
     drawSectionTitle(doc, 'Entrega / comprador', PAGE_MARGIN, buyerTop);
     drawKeyValueGrid(
       doc,
@@ -271,42 +308,7 @@ export class TlqvInvoiceDocumentsPdfService {
       523,
     );
 
-    const productTop = buyerTop + 116;
-    drawSectionTitle(doc, 'Producto vendido', PAGE_MARGIN, productTop);
-    const hasProductImage = productImage !== null;
-    const productDetailsWidth = hasProductImage ? 413 : 523;
-    drawKeyValueGrid(
-      doc,
-      [
-        [
-          'SKU',
-          orderDetails?.product?.sku ?? catalogProductDetails?.sku ?? '-',
-        ],
-        ['Producto orden', orderDetails?.product?.name ?? '-'],
-        ['Producto catalogo', catalogProductDetails?.title ?? '-'],
-        ['Marca', catalogProductDetails?.brand ?? '-'],
-        ['Item ML', catalogProductDetails?.itemId ?? '-'],
-        [
-          'Precio catalogo',
-          formatMoney(
-            catalogProductDetails?.price,
-            catalogProductDetails?.currencyId ?? 'ARS',
-          ),
-        ],
-        ['Unidades', formatNumber(orderDetails?.product?.unitCount)],
-        ['Link ML', catalogProductDetails?.permalink ?? '-'],
-      ],
-      PAGE_MARGIN,
-      productTop + 22,
-      productDetailsWidth,
-      2,
-    );
-
-    if (hasProductImage) {
-      drawProductImage(doc, productImage, PAGE_MARGIN + 423, productTop + 22);
-    }
-
-    const xubioItemsTop = productTop + 144;
+    const xubioItemsTop = buyerTop + 116;
     drawSectionTitle(doc, 'Detalle contable Xubio', PAGE_MARGIN, xubioItemsTop);
     this.drawRemitoItemsTable(
       doc,
@@ -331,14 +333,12 @@ export class TlqvInvoiceDocumentsPdfService {
   }
 
   private drawBrandHeader(doc: PDFKit.PDFDocument, title: string): void {
-    const logoPath =
-      this.configService.get<string>('TLQ_LOGO_PATH')?.trim() ??
-      DEFAULT_LOGO_PATH;
+    const logoPath = resolveLogoPath(this.configService);
 
     drawBox(doc, PAGE_MARGIN, PAGE_MARGIN, 523, 54);
-    if (logoPath !== '' && existsSync(logoPath)) {
+    if (logoPath !== null) {
       doc.image(logoPath, PAGE_MARGIN + 8, PAGE_MARGIN + 8, {
-        fit: [118, 36],
+        fit: [142, 36],
       });
     } else {
       writeText(
@@ -551,6 +551,175 @@ export class TlqvInvoiceDocumentsPdfService {
   }
 }
 
+function shouldIncludeDeliveryNote(data: TlqvInvoiceDocumentsData): boolean {
+  return data.orderDetails != null && data.catalogProductDetails != null;
+}
+
+function resolveLogoPath(configService: ConfigService): string | null {
+  const configuredPath = configService.get<string>('TLQ_LOGO_PATH')?.trim();
+  const candidates = [
+    configuredPath,
+    join(process.cwd(), LOGO_RELATIVE_PATH),
+    join(__dirname, '..', '..', '..', LOGO_RELATIVE_PATH),
+  ].filter((value): value is string => value !== undefined && value !== '');
+
+  return candidates.find((candidate) => existsSync(candidate)) ?? null;
+}
+
+function normalizeHttpImageUrl(value: string): string | null {
+  const trimmedValue = value.trim();
+  if (!/^https?:\/\//i.test(trimmedValue)) {
+    return null;
+  }
+
+  return trimmedValue.replace(/^http:\/\//i, 'https://');
+}
+
+function buildProductImageUrlCandidates(url: string): string[] {
+  const candidates = [url];
+
+  if (/\.webp($|\?)/i.test(url)) {
+    candidates.push(url.replace(/\.webp($|\?)/i, '.jpg$1'));
+  }
+
+  if (/mlstatic\.com/i.test(url)) {
+    const jpgUrl = url.replace(/\.webp($|\?)/i, '.jpg$1');
+    candidates.push(
+      jpgUrl.replace(/-I\.jpg($|\?)/i, '-O.jpg$1'),
+      jpgUrl.replace(/-I\.jpg($|\?)/i, '-F.jpg$1'),
+    );
+  }
+
+  return [...new Set(candidates)];
+}
+
+function isPdfKitSupportedImageContentType(contentType: string): boolean {
+  const normalizedContentType = contentType.toLowerCase();
+  return (
+    normalizedContentType.startsWith('image/jpeg') ||
+    normalizedContentType.startsWith('image/jpg') ||
+    normalizedContentType.startsWith('image/png')
+  );
+}
+
+function isPdfKitSupportedImageBuffer(image: Buffer): boolean {
+  return isJpeg(image) || isPng(image);
+}
+
+function isJpeg(image: Buffer): boolean {
+  return image.length > 3 && image[0] === 0xff && image[1] === 0xd8;
+}
+
+function isPng(image: Buffer): boolean {
+  return (
+    image.length > 8 &&
+    image[0] === 0x89 &&
+    image[1] === 0x50 &&
+    image[2] === 0x4e &&
+    image[3] === 0x47
+  );
+}
+
+function drawProductCard(
+  doc: PDFKit.PDFDocument,
+  data: TlqvInvoiceDocumentsData,
+  productImage: Buffer | null,
+  y: number,
+): void {
+  const { orderDetails, catalogProductDetails } = data;
+  drawFilledBox(doc, PAGE_MARGIN, y, 523, 144, SOFT_GRAY_COLOR);
+  drawBox(doc, PAGE_MARGIN, y, 523, 144, LIGHT_BORDER_COLOR);
+
+  drawProductImage(doc, productImage, PAGE_MARGIN + 16, y + 18);
+
+  const textX = PAGE_MARGIN + 150;
+  writeText(
+    doc,
+    catalogProductDetails?.title ?? orderDetails?.product?.name ?? '-',
+    textX,
+    y + 18,
+    330,
+    {
+      font: 'Helvetica-Bold',
+      fontSize: 13,
+      color: BRAND_COLOR,
+    },
+  );
+  writeText(doc, orderDetails?.product?.name ?? '', textX, y + 52, 330, {
+    fontSize: 8,
+    color: '#475569',
+  });
+
+  drawMiniMetric(
+    doc,
+    'SKU',
+    orderDetails?.product?.sku ?? catalogProductDetails?.sku ?? '-',
+    textX,
+    y + 84,
+    84,
+  );
+  drawMiniMetric(
+    doc,
+    'Marca',
+    catalogProductDetails?.brand ?? '-',
+    textX + 92,
+    y + 84,
+    84,
+  );
+  drawMiniMetric(
+    doc,
+    'Cantidad',
+    formatNumber(orderDetails?.product?.unitCount),
+    textX + 184,
+    y + 84,
+    64,
+  );
+  drawMiniMetric(
+    doc,
+    'Precio',
+    formatMoney(
+      catalogProductDetails?.price,
+      catalogProductDetails?.currencyId ?? 'ARS',
+    ),
+    textX + 256,
+    y + 84,
+    84,
+  );
+
+  writeText(
+    doc,
+    `Item ML: ${catalogProductDetails?.itemId ?? '-'}\n${catalogProductDetails?.permalink ?? ''}`,
+    textX,
+    y + 120,
+    330,
+    {
+      fontSize: 7,
+      color: '#64748b',
+    },
+  );
+}
+
+function drawMiniMetric(
+  doc: PDFKit.PDFDocument,
+  label: string,
+  value: string,
+  x: number,
+  y: number,
+  width: number,
+): void {
+  drawFilledBox(doc, x, y, width, 28, '#ffffff');
+  drawBox(doc, x, y, width, 28, '#e2e8f0');
+  writeText(doc, label, x + 6, y + 5, width - 12, {
+    fontSize: 6,
+    color: '#64748b',
+  });
+  writeText(doc, value, x + 6, y + 15, width - 12, {
+    font: 'Helvetica-Bold',
+    fontSize: 7,
+    color: BRAND_COLOR,
+  });
+}
+
 function drawSectionTitle(
   doc: PDFKit.PDFDocument,
   title: string,
@@ -611,13 +780,49 @@ function drawKeyValueGrid(
   });
 }
 
+function drawPill(
+  doc: PDFKit.PDFDocument,
+  text: string,
+  x: number,
+  y: number,
+  width: number,
+): void {
+  doc.save().roundedRect(x, y, width, 22, 11).fill(ACCENT_COLOR).restore();
+  writeText(doc, text, x + 8, y + 7, width - 16, {
+    font: 'Helvetica-Bold',
+    fontSize: 7,
+    color: '#ffffff',
+    align: 'center',
+  });
+}
+
+function drawFilledBox(
+  doc: PDFKit.PDFDocument,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  color: string,
+): void {
+  doc.save().rect(x, y, width, height).fill(color).restore();
+}
+
 function drawProductImage(
   doc: PDFKit.PDFDocument,
-  image: Buffer,
+  image: Buffer | null,
   x: number,
   y: number,
 ): void {
   drawBox(doc, x, y, 100, 96, LIGHT_BORDER_COLOR);
+  if (image === null) {
+    writeText(doc, 'Imagen no disponible', x + 10, y + 40, 80, {
+      fontSize: 7,
+      color: '#777777',
+      align: 'center',
+    });
+    return;
+  }
+
   try {
     doc.image(image, x + 8, y + 8, {
       fit: [84, 80],
