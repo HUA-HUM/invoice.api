@@ -226,6 +226,43 @@ describe('BackfillXubioComprobantesInteractor', () => {
     });
   });
 
+  it('extracts only the numeric Mercado Libre order id after ML marker', async () => {
+    const summary = createSummary(70849784);
+    const detail = {
+      ...createDetail(70849784),
+      descripcion:
+        'TLQV-8821 ML: 2000011636781797  Arrocera Comercial 18 Litros 90 Tazas Cocidas Calor Automáti Blanco Frecuencia',
+    };
+    const getByDateRangeRepository = createGetByDateRangeRepository();
+    getByDateRangeRepository.getByDateRange.mockResolvedValue({
+      comprobantes: [summary],
+    });
+    const getDetailRepository = createGetDetailRepository();
+    getDetailRepository.getDetail.mockResolvedValue({ comprobante: detail });
+    const madreRepository = createMadreRepository();
+    const interactor = new BackfillXubioComprobantesInteractor(
+      getByDateRangeRepository,
+      getDetailRepository,
+      madreRepository,
+      () => new Date('2026-03-23T12:00:00.000Z'),
+    );
+
+    await interactor.execute({
+      fechaDesde: '2026-03-23',
+      fechaHasta: '2026-03-23',
+      batchSize: 1,
+    });
+
+    expect(madreRepository.upsertBatch).toHaveBeenCalledWith({
+      items: [
+        expect.objectContaining({
+          tlqvCode: 'TLQV-8821',
+          mlOrderId: '2000011636781797',
+        }),
+      ],
+    });
+  });
+
   it('marks the sync run as partial when detail requests fail after retries', async () => {
     const getByDateRangeRepository = createGetByDateRangeRepository();
     getByDateRangeRepository.getByDateRange.mockResolvedValue({

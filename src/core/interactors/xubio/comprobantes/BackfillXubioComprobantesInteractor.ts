@@ -719,7 +719,7 @@ function extractTlqv(
 }
 
 function extractMercadoLibreOrderId(descripcion: string): string | null {
-  const match = /ML:\s*([^\n\r]+)/i.exec(descripcion);
+  const match = /\bML:\s*(\d{8,30})\b/i.exec(descripcion);
   return match?.[1]?.trim() || null;
 }
 
