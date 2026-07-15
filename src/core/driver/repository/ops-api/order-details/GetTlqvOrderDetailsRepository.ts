@@ -128,6 +128,9 @@ function parseOrderDetailsResponse(
 
   const customer = isRecord(value.sale.customer) ? value.sale.customer : {};
   const address = isRecord(customer.address) ? customer.address : {};
+  const product = isRecord(value.sale.product) ? value.sale.product : {};
+  const amounts = isRecord(value.sale.amounts) ? value.sale.amounts : {};
+  const statuses = isRecord(value.sale.statuses) ? value.sale.statuses : {};
   const buyerCuit = readOptionalString(customer, 'buyerCuit');
   const shippingCuit = readOptionalString(customer, 'shippingCuit');
   const buyerData: TlqvOrderBuyerData = {
@@ -152,6 +155,26 @@ function parseOrderDetailsResponse(
     source: SOURCE,
     saleNumber: readOptionalString(value.sale, 'saleNumber'),
     buyerData,
+    product: {
+      sku: readOptionalString(product, 'sku'),
+      asin: readOptionalString(product, 'asin'),
+      name: readOptionalString(product, 'name'),
+      amazonName: readOptionalString(product, 'amazonName'),
+      unitCount: readOptionalNumber(product, 'unitCount'),
+      bundleCount: readOptionalNumber(product, 'bundleCount'),
+    },
+    amounts: {
+      salePrice: readOptionalNumber(amounts, 'salePrice'),
+      amazonPriceUsd: readOptionalNumber(amounts, 'amazonPriceUsd'),
+      amazonUnitPriceUsd: readOptionalNumber(amounts, 'amazonUnitPriceUsd'),
+    },
+    statuses: {
+      estadoVbi: readOptionalLabel(statuses, 'estadoVbi'),
+      legacyEstado: readOptionalString(statuses, 'legacyEstado'),
+      amazon: readOptionalString(statuses, 'amazon'),
+      shipping: readOptionalString(statuses, 'shipping'),
+      order: readOptionalString(statuses, 'order'),
+    },
     rawPayload: value,
   };
 
@@ -240,6 +263,47 @@ function readOptionalString(
 
   const trimmedValue = value.trim();
   return trimmedValue === '' ? null : trimmedValue;
+}
+
+function readOptionalNumber(
+  source: Record<string, unknown>,
+  field: string,
+): number | null {
+  const value = source[field];
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === 'string' && value.trim() !== '') {
+    const numberValue = Number(value);
+    if (Number.isFinite(numberValue)) {
+      return numberValue;
+    }
+  }
+
+  throw new OpsApiTlqvOrderDetailsInvalidResponseError(
+    `${field} must be a finite number, numeric string, null or undefined`,
+  );
+}
+
+function readOptionalLabel(
+  source: Record<string, unknown>,
+  field: string,
+): string | null {
+  const value = source[field];
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  if (isRecord(value)) {
+    return readOptionalString(value, 'label');
+  }
+
+  return readOptionalString(source, field);
 }
 
 function normalizeDigits(value: string | null): string | null {

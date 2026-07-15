@@ -14,11 +14,37 @@ export interface TlqvOrderBuyerData {
   email?: string | null;
 }
 
+export interface TlqvOrderProductData {
+  sku?: string | null;
+  asin?: string | null;
+  name?: string | null;
+  amazonName?: string | null;
+  unitCount?: number | null;
+  bundleCount?: number | null;
+}
+
+export interface TlqvOrderAmountsData {
+  salePrice?: number | null;
+  amazonPriceUsd?: number | null;
+  amazonUnitPriceUsd?: number | null;
+}
+
+export interface TlqvOrderStatusData {
+  estadoVbi?: string | null;
+  legacyEstado?: string | null;
+  amazon?: string | null;
+  shipping?: string | null;
+  order?: string | null;
+}
+
 export interface TlqvOrderDetails {
   tlqvCode: string;
   source: TlqvOrderDetailsSource;
   saleNumber?: string | null;
   buyerData: TlqvOrderBuyerData;
+  product?: TlqvOrderProductData;
+  amounts?: TlqvOrderAmountsData;
+  statuses?: TlqvOrderStatusData;
   rawPayload: unknown;
 }
 

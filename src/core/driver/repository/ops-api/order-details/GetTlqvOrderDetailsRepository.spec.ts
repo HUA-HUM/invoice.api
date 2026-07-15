@@ -42,6 +42,26 @@ describe('GetOpsApiTlqvOrderDetailsRepository', () => {
           codigoPostal: '5127',
           email: null,
         },
+        product: {
+          sku: 'B0BWJ2F8NC',
+          asin: null,
+          name: 'Vevor Taladro Magnético Eléctrico',
+          amazonName: null,
+          unitCount: 1,
+          bundleCount: 1,
+        },
+        amounts: {
+          salePrice: 880589.01,
+          amazonPriceUsd: 155.9,
+          amazonUnitPriceUsd: 155.9,
+        },
+        statuses: {
+          estadoVbi: 'ENTREGADO',
+          legacyEstado: null,
+          amazon: null,
+          shipping: null,
+          order: null,
+        },
         rawPayload: createOpsApiResponse(),
       },
     });
@@ -109,6 +129,16 @@ function createOpsApiResponse() {
       id: 'e4e3fec3-3b97-4683-b2ba-4e617981a95a',
       tlqtNumber: 'TLQV-12903',
       saleNumber: '2000016611544830',
+      statuses: {
+        estadoVbi: {
+          value: 100000014,
+          label: 'ENTREGADO',
+        },
+        legacyEstado: null,
+        amazon: null,
+        shipping: null,
+        order: null,
+      },
       customer: {
         recipientName: 'Marcelo Goy',
         buyerCuit: '30601997114',
@@ -124,6 +154,19 @@ function createOpsApiResponse() {
           province: 'Córdoba',
           postalCode: '5127',
         },
+      },
+      product: {
+        sku: 'B0BWJ2F8NC',
+        asin: null,
+        name: 'Vevor Taladro Magnético Eléctrico',
+        amazonName: null,
+        unitCount: 1,
+        bundleCount: 1,
+      },
+      amounts: {
+        salePrice: 880589.01,
+        amazonPriceUsd: 155.9,
+        amazonUnitPriceUsd: 155.9,
       },
     },
   };

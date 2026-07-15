@@ -8,9 +8,15 @@ import type {
   FindMadreXubioComprobanteByTlqvCodeResponse,
   FindMadreXubioComprobantesByTlqvCodesCommand,
   FindMadreXubioComprobantesByTlqvCodesResponse,
+  FindFullMadreXubioComprobanteByTlqvCodeCommand,
+  FindFullMadreXubioComprobanteByTlqvCodeResponse,
+  MadreXubioCobranzaItem,
+  MadreXubioComprobante,
   MadreXubioComprobanteDocumentKind,
   MadreXubioComprobanteSyncRun,
   MadreXubioComprobanteTlqvLookupItem,
+  MadreXubioPercepcionItem,
+  MadreXubioProductItem,
   UpdateMadreXubioComprobanteSyncRunCommand,
   UpsertMadreXubioComprobantesBatchCommand,
   UpsertMadreXubioComprobantesBatchResponse,
@@ -185,6 +191,32 @@ export class MadreXubioComprobantesRepository implements IMadreXubioComprobantes
         throw error;
       }
       throw buildRequestError('find by TLQV code', error);
+    }
+  }
+
+  async findFullByTlqvCode(
+    command: FindFullMadreXubioComprobanteByTlqvCodeCommand,
+  ): Promise<FindFullMadreXubioComprobanteByTlqvCodeResponse> {
+    const tlqvCode = command.tlqvCode.trim();
+    if (tlqvCode === '') {
+      return { items: [] };
+    }
+
+    try {
+      const response = await this.httpClient.get<unknown>(BASE_PATH, {
+        headers: this.buildHeaders(),
+        params: {
+          tlqvCode,
+          limit: 50,
+        },
+      });
+
+      return parseFindFullByTlqvCodeResponse(response.data);
+    } catch (error: unknown) {
+      if (error instanceof MadreXubioComprobantesInvalidResponseError) {
+        throw error;
+      }
+      throw buildRequestError('find full by TLQV code', error);
     }
   }
 
@@ -375,6 +407,225 @@ function parseExistsByTlqvCodeResponse(
   };
 }
 
+function parseFindFullByTlqvCodeResponse(
+  value: unknown,
+): FindFullMadreXubioComprobanteByTlqvCodeResponse {
+  const rawItems = Array.isArray(value)
+    ? value
+    : isRecord(value) && Array.isArray(value.items)
+      ? value.items
+      : undefined;
+
+  if (rawItems === undefined) {
+    throw new MadreXubioComprobantesInvalidResponseError(
+      'full TLQV lookup response must be an array or an object with items array',
+    );
+  }
+
+  return {
+    items: rawItems.map(parseFullComprobanteItem),
+  };
+}
+
+function parseFullComprobanteItem(
+  value: unknown,
+  index: number,
+): MadreXubioComprobante {
+  if (!isRecord(value)) {
+    throw new MadreXubioComprobantesInvalidResponseError(
+      `items[${index}] must be an object`,
+    );
+  }
+
+  return {
+    xubioTransactionId: readFlexibleNumber(value, 'xubioTransactionId'),
+    syncRunId: readOptionalNullableFlexibleNumber(value, 'syncRunId'),
+    source: readOptionalNullableString(value, 'source'),
+    externalId: readOptionalNullableString(value, 'externalId'),
+    numeroDocumento: readOptionalNullableString(value, 'numeroDocumento'),
+    tipoCodigo: readOptionalNullableFlexibleNumber(value, 'tipoCodigo'),
+    tipoNombre: readOptionalNullableString(value, 'tipoNombre'),
+    documentKind: readOptionalNullableString(value, 'documentKind') as
+      MadreXubioComprobanteDocumentKind | null | undefined,
+    letraComprobante: readOptionalNullableString(value, 'letraComprobante'),
+    descripcion: readOptionalNullableString(value, 'descripcion'),
+    tlqvCode: readOptionalNullableString(value, 'tlqvCode'),
+    tlqvNumber: readOptionalNullableFlexibleNumber(value, 'tlqvNumber'),
+    mlOrderId: readOptionalNullableString(value, 'mlOrderId'),
+    fechaEmision: readOptionalNullableString(value, 'fechaEmision') ?? '',
+    fechaVencimiento: readOptionalNullableString(value, 'fechaVencimiento'),
+    importeGravado: readOptionalNullableFlexibleNumber(value, 'importeGravado'),
+    importeImpuestos: readOptionalNullableFlexibleNumber(
+      value,
+      'importeImpuestos',
+    ),
+    importeTotal: readOptionalNullableFlexibleNumber(value, 'importeTotal'),
+    importeMonedaPrincipal: readOptionalNullableFlexibleNumber(
+      value,
+      'importeMonedaPrincipal',
+    ),
+    monedaId: readOptionalNullableFlexibleNumber(value, 'monedaId'),
+    monedaCodigo: readOptionalNullableString(value, 'monedaCodigo'),
+    monedaNombre: readOptionalNullableString(value, 'monedaNombre'),
+    cotizacion: readOptionalNullableFlexibleNumber(value, 'cotizacion'),
+    cotizacionListaPrecio: readOptionalNullableFlexibleNumber(
+      value,
+      'cotizacionListaPrecio',
+    ),
+    circuitoContableId: readOptionalNullableFlexibleNumber(
+      value,
+      'circuitoContableId',
+    ),
+    circuitoContableCodigo: readOptionalNullableString(
+      value,
+      'circuitoContableCodigo',
+    ),
+    circuitoContableNombre: readOptionalNullableString(
+      value,
+      'circuitoContableNombre',
+    ),
+    depositoId: readOptionalNullableFlexibleNumber(value, 'depositoId'),
+    depositoCodigo: readOptionalNullableString(value, 'depositoCodigo'),
+    depositoNombre: readOptionalNullableString(value, 'depositoNombre'),
+    condicionPago: readOptionalNullableFlexibleNumber(value, 'condicionPago'),
+    porcentajeComision: readOptionalNullableFlexibleNumber(
+      value,
+      'porcentajeComision',
+    ),
+    puntoVentaId: readOptionalNullableFlexibleNumber(value, 'puntoVentaId'),
+    puntoVentaCodigo: readOptionalNullableString(value, 'puntoVentaCodigo'),
+    puntoVentaNombre: readOptionalNullableString(value, 'puntoVentaNombre'),
+    clienteXubioId: readOptionalNullableFlexibleNumber(value, 'clienteXubioId'),
+    clienteCodigo: readOptionalNullableString(value, 'clienteCodigo'),
+    clienteNombre: readOptionalNullableString(value, 'clienteNombre'),
+    provinciaId: readOptionalNullableFlexibleNumber(value, 'provinciaId'),
+    provinciaCodigo: readOptionalNullableString(value, 'provinciaCodigo'),
+    provinciaNombre: readOptionalNullableString(value, 'provinciaNombre'),
+    facturaNoExportacion: readOptionalNullableBoolean(
+      value,
+      'facturaNoExportacion',
+    ),
+    cbuInformada: readOptionalNullableBoolean(value, 'cbuInformada'),
+    mailEstado: readOptionalNullableString(value, 'mailEstado'),
+    cae: readOptionalNullableString(value, 'cae'),
+    caeFechaVencimiento: readOptionalNullableString(
+      value,
+      'caeFechaVencimiento',
+    ),
+    fiscalmenteEmitido: readOptionalNullableBoolean(
+      value,
+      'fiscalmenteEmitido',
+    ),
+    rawListPayload: value.rawListPayload,
+    rawDetailPayload: value.rawDetailPayload,
+    syncedAt: readOptionalNullableString(value, 'syncedAt'),
+    productItems: parseProductItems(value.productItems),
+    cobranzaItems: parseCobranzaItems(value.cobranzaItems),
+    percepcionItems: parsePercepcionItems(value.percepcionItems),
+  };
+}
+
+function parseProductItems(value: unknown): MadreXubioProductItem[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.map((item, index) => {
+    if (!isRecord(item)) {
+      throw new MadreXubioComprobantesInvalidResponseError(
+        `productItems[${index}] must be an object`,
+      );
+    }
+
+    return {
+      transaccionCvItemId: readOptionalNullableFlexibleNumber(
+        item,
+        'transaccionCvItemId',
+      ),
+      productoId: readOptionalNullableFlexibleNumber(item, 'productoId'),
+      productoCodigo: readOptionalNullableString(item, 'productoCodigo'),
+      productoNombre: readOptionalNullableString(item, 'productoNombre'),
+      depositoId: readOptionalNullableFlexibleNumber(item, 'depositoId'),
+      depositoCodigo: readOptionalNullableString(item, 'depositoCodigo'),
+      depositoNombre: readOptionalNullableString(item, 'depositoNombre'),
+      descripcion: readOptionalNullableString(item, 'descripcion'),
+      cantidad: readOptionalNullableFlexibleNumber(item, 'cantidad'),
+      precio: readOptionalNullableFlexibleNumber(item, 'precio'),
+      importe: readOptionalNullableFlexibleNumber(item, 'importe'),
+      iva: readOptionalNullableFlexibleNumber(item, 'iva'),
+      total: readOptionalNullableFlexibleNumber(item, 'total'),
+      precioConIvaIncluido: readOptionalNullableFlexibleNumber(
+        item,
+        'precioConIvaIncluido',
+      ),
+      montoExento: readOptionalNullableFlexibleNumber(item, 'montoExento'),
+      porcentajeDescuento: readOptionalNullableFlexibleNumber(
+        item,
+        'porcentajeDescuento',
+      ),
+      rawPayload: item.rawPayload,
+    };
+  });
+}
+
+function parseCobranzaItems(value: unknown): MadreXubioCobranzaItem[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.map((item, index) => {
+    if (!isRecord(item)) {
+      throw new MadreXubioComprobantesInvalidResponseError(
+        `cobranzaItems[${index}] must be an object`,
+      );
+    }
+
+    return {
+      itemId: readOptionalNullableFlexibleNumber(item, 'itemId'),
+      cuentaTipo: readOptionalNullableString(item, 'cuentaTipo'),
+      cuentaId: readOptionalNullableFlexibleNumber(item, 'cuentaId'),
+      monedaId: readOptionalNullableFlexibleNumber(item, 'monedaId'),
+      monedaCodigo: readOptionalNullableString(item, 'monedaCodigo'),
+      monedaNombre: readOptionalNullableString(item, 'monedaNombre'),
+      cotizacionMonedaTransaccion: readOptionalNullableFlexibleNumber(
+        item,
+        'cotizacionMonedaTransaccion',
+      ),
+      importeMonedaPrincipal: readOptionalNullableFlexibleNumber(
+        item,
+        'importeMonedaPrincipal',
+      ),
+      importeMonedaTransaccion: readOptionalNullableFlexibleNumber(
+        item,
+        'importeMonedaTransaccion',
+      ),
+      descripcion: readOptionalNullableString(item, 'descripcion'),
+      rawPayload: item.rawPayload,
+    };
+  });
+}
+
+function parsePercepcionItems(value: unknown): MadreXubioPercepcionItem[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.map((item, index) => {
+    if (!isRecord(item)) {
+      throw new MadreXubioComprobantesInvalidResponseError(
+        `percepcionItems[${index}] must be an object`,
+      );
+    }
+
+    return {
+      itemId: readOptionalNullableFlexibleNumber(item, 'itemId'),
+      descripcion: readOptionalNullableString(item, 'descripcion'),
+      importe: readOptionalNullableFlexibleNumber(item, 'importe'),
+      rawPayload: item.rawPayload,
+    };
+  });
+}
+
 function parseTlqvLookupItem(
   value: unknown,
   index: number,
@@ -424,6 +675,57 @@ function readOptionalNullableNumber(
   if (typeof value !== 'number' || !Number.isFinite(value)) {
     throw new MadreXubioComprobantesInvalidResponseError(
       `${field} must be a number, null or undefined`,
+    );
+  }
+  return value;
+}
+
+function readFlexibleNumber(
+  source: Record<string, unknown>,
+  field: string,
+): number {
+  const value = readOptionalNullableFlexibleNumber(source, field);
+  if (value === undefined || value === null) {
+    throw new MadreXubioComprobantesInvalidResponseError(
+      `${field} must be a number`,
+    );
+  }
+  return value;
+}
+
+function readOptionalNullableFlexibleNumber(
+  source: Record<string, unknown>,
+  field: string,
+): number | null | undefined {
+  const value = source[field];
+  if (value === undefined || value === null) {
+    return value;
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === 'string' && value.trim() !== '') {
+    const numberValue = Number(value);
+    if (Number.isFinite(numberValue)) {
+      return numberValue;
+    }
+  }
+  throw new MadreXubioComprobantesInvalidResponseError(
+    `${field} must be a number, numeric string, null or undefined`,
+  );
+}
+
+function readOptionalNullableBoolean(
+  source: Record<string, unknown>,
+  field: string,
+): boolean | null | undefined {
+  const value = source[field];
+  if (value === undefined || value === null) {
+    return value;
+  }
+  if (typeof value !== 'boolean') {
+    throw new MadreXubioComprobantesInvalidResponseError(
+      `${field} must be a boolean, null or undefined`,
     );
   }
   return value;

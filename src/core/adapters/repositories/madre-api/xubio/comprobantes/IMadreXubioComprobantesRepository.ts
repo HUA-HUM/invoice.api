@@ -6,6 +6,8 @@ import type {
   FindMadreXubioComprobanteByTlqvCodeResponse,
   FindMadreXubioComprobantesByTlqvCodesCommand,
   FindMadreXubioComprobantesByTlqvCodesResponse,
+  FindFullMadreXubioComprobanteByTlqvCodeCommand,
+  FindFullMadreXubioComprobanteByTlqvCodeResponse,
   MadreXubioComprobanteSyncRun,
   UpdateMadreXubioComprobanteSyncRunCommand,
   UpsertMadreXubioComprobantesBatchCommand,
@@ -32,6 +34,10 @@ export interface IMadreXubioComprobantesRepository {
   findByTlqvCode(
     command: FindMadreXubioComprobanteByTlqvCodeCommand,
   ): Promise<FindMadreXubioComprobanteByTlqvCodeResponse>;
+
+  findFullByTlqvCode(
+    command: FindFullMadreXubioComprobanteByTlqvCodeCommand,
+  ): Promise<FindFullMadreXubioComprobanteByTlqvCodeResponse>;
 
   existsByTlqvCode(
     command: ExistsMadreXubioComprobanteByTlqvCodeCommand,

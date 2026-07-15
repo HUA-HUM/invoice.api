@@ -51,6 +51,10 @@ async function bootstrap() {
         'Creación de clientes Xubio desde TLQV o issues fiscales',
       )
       .addTag(
+        'TLQV Invoice - Documentos',
+        'Generación de PDFs internos para Odoo: factura y remito por TLQV',
+      )
+      .addTag(
         'TLQV Invoice - Issues',
         'Consulta de problemas fiscales o de clientes detectados durante el flujo',
       )

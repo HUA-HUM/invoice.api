@@ -174,6 +174,14 @@ export interface FindMadreXubioComprobanteByTlqvCodeResponse {
   items: MadreXubioComprobanteTlqvLookupItem[];
 }
 
+export interface FindFullMadreXubioComprobanteByTlqvCodeCommand {
+  tlqvCode: string;
+}
+
+export interface FindFullMadreXubioComprobanteByTlqvCodeResponse {
+  items: MadreXubioComprobante[];
+}
+
 export interface ExistsMadreXubioComprobanteByTlqvCodeCommand {
   tlqvCode: string;
 }
