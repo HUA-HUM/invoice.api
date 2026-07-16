@@ -108,8 +108,9 @@ export class DigitalOceanSpacesInvoiceDocumentStorageRepository implements IInvo
           Body: command.body,
           ContentType: command.contentType,
           ContentLength: command.body.length,
+          ACL: 'public-read',
           CacheControl: 'public, max-age=31536000, immutable',
-          ContentDisposition: `inline; filename="${sanitizeFilename(command.filename)}"`,
+          ContentDisposition: `attachment; filename="${sanitizeFilename(command.filename)}"`,
         }),
       );
 
