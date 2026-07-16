@@ -8,7 +8,6 @@ import type { TlqvInvoiceDocumentsData } from '../../core/entities/tlqv/TlqvInvo
 const PAGE_MARGIN = 36;
 const TABLE_BORDER_COLOR = '#222222';
 const LIGHT_BORDER_COLOR = '#cccccc';
-const HEADER_FILL_COLOR = '#f1f1f1';
 const INVOICE_HEADER_FILL_COLOR = '#dff4ff';
 const INVOICE_HEADER_BORDER_COLOR = '#8bd8ff';
 const BRAND_COLOR = '#111827';
@@ -206,7 +205,7 @@ export class TlqvInvoiceDocumentsPdfService {
     drawSectionTitle(doc, 'Producto vendido', PAGE_MARGIN, productTop);
     drawProductCard(doc, data, productImage, productTop + 22);
 
-    const buyerTop = productTop + 184;
+    const buyerTop = productTop + 164;
     drawSectionTitle(doc, 'Entrega / comprador', PAGE_MARGIN, buyerTop);
     drawKeyValueGrid(
       doc,
@@ -242,21 +241,14 @@ export class TlqvInvoiceDocumentsPdfService {
       523,
     );
 
-    const xubioItemsTop = buyerTop + 116;
-    drawSectionTitle(doc, 'Detalle contable Xubio', PAGE_MARGIN, xubioItemsTop);
-    this.drawRemitoItemsTable(
-      doc,
-      comprobante.productItems ?? [],
-      xubioItemsTop + 22,
-    );
-
     if (data.warnings.length > 0) {
-      drawSectionTitle(doc, 'Advertencias', PAGE_MARGIN, 710);
+      const warningsTop = buyerTop + 112;
+      drawSectionTitle(doc, 'Advertencias', PAGE_MARGIN, warningsTop);
       writeText(
         doc,
         data.warnings.map((warning) => `- ${warning}`).join('\n'),
         PAGE_MARGIN,
-        730,
+        warningsTop + 18,
         523,
         {
           fontSize: 8,
@@ -499,38 +491,6 @@ export class TlqvInvoiceDocumentsPdfService {
     }
 
     return rowY;
-  }
-
-  private drawRemitoItemsTable(
-    doc: PDFKit.PDFDocument,
-    items: Array<{
-      productoNombre?: string | null;
-      descripcion?: string | null;
-      cantidad?: number | null;
-      total?: number | null;
-    }>,
-    y: number,
-  ): void {
-    const columns = [
-      { label: '#', width: 26 },
-      { label: 'Producto', width: 190 },
-      { label: 'Detalle', width: 190 },
-      { label: 'Cant.', width: 48 },
-      { label: 'Total', width: 69 },
-    ];
-    drawTableHeader(doc, columns, PAGE_MARGIN, y, 22);
-
-    let rowY = y + 22;
-    items.slice(0, 10).forEach((item, index) => {
-      drawTableRow(doc, columns, PAGE_MARGIN, rowY, 24, [
-        String(index + 1),
-        item.productoNombre ?? '',
-        item.descripcion ?? '',
-        formatNumber(item.cantidad),
-        formatNumber(item.total),
-      ]);
-      rowY += 24;
-    });
   }
 
   private drawInvoiceTotals(
@@ -887,8 +847,8 @@ function drawProductCard(
   y: number,
 ): void {
   const { orderDetails, catalogProductDetails } = data;
-  drawFilledBox(doc, PAGE_MARGIN, y, 523, 144, SOFT_GRAY_COLOR);
-  drawBox(doc, PAGE_MARGIN, y, 523, 144, LIGHT_BORDER_COLOR);
+  drawFilledBox(doc, PAGE_MARGIN, y, 523, 124, SOFT_GRAY_COLOR);
+  drawBox(doc, PAGE_MARGIN, y, 523, 124, LIGHT_BORDER_COLOR);
 
   drawProductImage(doc, productImage, PAGE_MARGIN + 16, y + 18);
 
@@ -944,18 +904,6 @@ function drawProductCard(
     textX + 256,
     y + 84,
     84,
-  );
-
-  writeText(
-    doc,
-    `Item ML: ${catalogProductDetails?.itemId ?? '-'}\n${catalogProductDetails?.permalink ?? ''}`,
-    textX,
-    y + 120,
-    330,
-    {
-      fontSize: 7,
-      color: '#64748b',
-    },
   );
 }
 
@@ -1098,29 +1046,6 @@ function drawProductImage(
   }
 }
 
-function drawTableHeader(
-  doc: PDFKit.PDFDocument,
-  columns: Array<{ label: string; width: number }>,
-  x: number,
-  y: number,
-  height: number,
-): void {
-  doc
-    .save()
-    .rect(x, y, sumColumnWidths(columns), height)
-    .fill(HEADER_FILL_COLOR)
-    .restore();
-  drawTableRow(
-    doc,
-    columns,
-    x,
-    y,
-    height,
-    columns.map((column) => column.label),
-    true,
-  );
-}
-
 function drawInvoiceTableHeader(
   doc: PDFKit.PDFDocument,
   columns: Array<{ label: string; width: number }>,
@@ -1174,26 +1099,6 @@ function drawInvoiceTableRow(
   drawStrokeLine(doc, x, y + height, x + sumColumnWidths(columns), y + height, {
     color: '#d6c5c5',
     width: 0.5,
-  });
-}
-
-function drawTableRow(
-  doc: PDFKit.PDFDocument,
-  columns: Array<{ label: string; width: number }>,
-  x: number,
-  y: number,
-  height: number,
-  values: string[],
-  bold = false,
-): void {
-  let currentX = x;
-  columns.forEach((column, index) => {
-    drawBox(doc, currentX, y, column.width, height, LIGHT_BORDER_COLOR);
-    writeText(doc, values[index] ?? '', currentX + 4, y + 6, column.width - 8, {
-      font: bold ? 'Helvetica-Bold' : 'Helvetica',
-      fontSize: 7,
-    });
-    currentX += column.width;
   });
 }
 
