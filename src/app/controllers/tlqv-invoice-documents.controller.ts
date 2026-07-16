@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  Body,
   Controller,
   Get,
   NotFoundException,
@@ -15,12 +16,14 @@ import {
   ApiParam,
   ApiProduces,
   ApiNotFoundResponse,
+  ApiBody,
   ApiTags,
 } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { TlqvInvoiceDocumentsNotFoundError } from '../../core/interactors/tlqv/GenerateTlqvInvoiceDocumentsInteractor';
 import { InternalApiKeyGuard } from '../guards/internal-api-key.guard';
 import { ApiInternalEndpoint } from '../modules/shared/swagger/internal-api-docs.decorators';
+import { TlqvInvoiceDocumentsCdnQueueService } from '../services/tlqv-invoice-documents-cdn-queue.service';
 import { TlqvInvoiceDocumentsService } from '../services/tlqv-invoice-documents.service';
 
 @ApiTags('TLQV Invoice - Documentos')
@@ -29,6 +32,7 @@ import { TlqvInvoiceDocumentsService } from '../services/tlqv-invoice-documents.
 export class TlqvInvoiceDocumentsController {
   constructor(
     private readonly tlqvInvoiceDocumentsService: TlqvInvoiceDocumentsService,
+    private readonly tlqvInvoiceDocumentsCdnQueueService: TlqvInvoiceDocumentsCdnQueueService,
   ) {}
 
   @ApiInternalEndpoint()
@@ -131,6 +135,58 @@ export class TlqvInvoiceDocumentsController {
 
   @ApiInternalEndpoint()
   @ApiOperation({
+    summary: 'Encolar generación/subida CDN de PDFs por TLQV',
+    description:
+      'Recibe una lista de TLQVs y encola un job por cada uno. Cada job ejecuta el flujo idempotente: si el PDF ya existe en CDN devuelve already_exists; si no existe, lo genera y lo sube.',
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['tlqvCodes'],
+      properties: {
+        tlqvCodes: {
+          type: 'array',
+          items: {
+            type: 'string',
+            example: 'TLQV-12948',
+          },
+        },
+      },
+      example: {
+        tlqvCodes: ['TLQV-12365', 'TLQV-12948'],
+      },
+    },
+  })
+  @ApiOkResponse({
+    description: 'Jobs encolados.',
+    schema: {
+      example: {
+        status: 'queued',
+        queueName: 'tlqv-invoice-documents-cdn',
+        totalRequested: 2,
+        totalQueued: 2,
+        totalInvalid: 0,
+        jobs: [
+          {
+            tlqvCode: 'TLQV-12365',
+            jobId: 'tlqv-invoice-document-cdn-TLQV-12365-1780000000000-0',
+          },
+        ],
+        invalidItems: [],
+      },
+    },
+  })
+  @Post('cdn/bulk')
+  async enqueueCdnPdfBulk(@Body() body: unknown) {
+    const tlqvCodes = readBulkTlqvCodes(body);
+
+    return this.tlqvInvoiceDocumentsCdnQueueService.enqueueBulk({
+      tlqvCodes,
+    });
+  }
+
+  @ApiInternalEndpoint()
+  @ApiOperation({
     summary: 'Crear o devolver PDF guardado en CDN por TLQV',
     description:
       'Proceso idempotente: si ya existe un PDF en CDN para el TLQV devuelve esa URL. Si no existe, genera el PDF actual, lo sube a CDN y devuelve la URL.',
@@ -167,4 +223,26 @@ export class TlqvInvoiceDocumentsController {
       throw error;
     }
   }
+}
+
+function readBulkTlqvCodes(body: unknown): string[] {
+  if (!isRecord(body)) {
+    throw new BadRequestException('Body must be an object');
+  }
+
+  const rawTlqvCodes = body.tlqvCodes ?? body.items;
+  if (!Array.isArray(rawTlqvCodes)) {
+    throw new BadRequestException('tlqvCodes must be an array');
+  }
+
+  const tlqvCodes = rawTlqvCodes.map((value) => String(value).trim());
+  if (tlqvCodes.length === 0) {
+    throw new BadRequestException('tlqvCodes must not be empty');
+  }
+
+  return tlqvCodes;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
