@@ -40,6 +40,7 @@ export interface CreateTlqvInvoiceFlowCommand {
   tlqvCode: string;
   stopAfter?: TlqvInvoiceFlowStopAfter;
   dryRun?: boolean;
+  issueDate?: string;
 }
 
 export interface TlqvInvoiceFlowBlocker {
@@ -116,6 +117,34 @@ export class CreateTlqvInvoiceFlowInteractor {
     const stopAfter = command.stopAfter ?? 'source_data';
     const dryRun = command.dryRun ?? true;
     const steps: TlqvInvoiceFlowStep[] = [];
+    let issueDate = this.getTodayIsoDate();
+
+    if (stopAfter === 'invoice_creation') {
+      const issueDateValidation = validateIssueDateTolerance({
+        issueDate: command.issueDate,
+        todayIsoDate: this.getTodayIsoDate(),
+      });
+
+      if (!issueDateValidation.valid) {
+        steps.push({
+          name: 'invoice_creation',
+          status: 'blocked',
+          blockers: [issueDateValidation.blocker],
+        });
+
+        return {
+          status: 'blocked',
+          canContinue: false,
+          tlqvCode,
+          stopAfter,
+          dryRun,
+          steps,
+          blockers: [issueDateValidation.blocker],
+        };
+      }
+
+      issueDate = issueDateValidation.issueDate;
+    }
 
     const clienteFlow = await this.createXubioClienteFromTlqvUseCase.execute({
       tlqvCode,
@@ -261,7 +290,7 @@ export class CreateTlqvInvoiceFlowInteractor {
         fiscalCondition: clienteFlow.fiscalInfo.condicionImpositiva,
         tlqvSheetItem: sourceData.tlqvSheet.item,
         madreSheetItem: sourceData.madreSheet.item,
-        issueDate: this.getTodayIsoDate(),
+        issueDate,
       });
     } catch (error: unknown) {
       const blocker = {
@@ -488,6 +517,97 @@ function normalizeRequiredTlqvCode(value: string): string {
 
   const match = normalized.match(/TLQV-\d+/);
   return match?.[0] ?? normalized;
+}
+
+function validateIssueDateTolerance(command: {
+  issueDate: string | undefined;
+  todayIsoDate: string;
+}):
+  | {
+      valid: true;
+      issueDate: string;
+    }
+  | {
+      valid: false;
+      blocker: TlqvInvoiceFlowBlocker;
+    } {
+  const today = parseIsoDateOnly(command.todayIsoDate);
+  const issueDate = command.issueDate?.trim() ?? command.todayIsoDate.trim();
+  const parsedIssueDate = parseIsoDateOnly(issueDate);
+
+  if (today === null) {
+    throw new RangeError('todayIsoDate must have YYYY-MM-DD format');
+  }
+
+  if (parsedIssueDate === null) {
+    return {
+      valid: false,
+      blocker: {
+        code: 'INVALID_INVOICE_ISSUE_DATE',
+        message: 'issueDate must have YYYY-MM-DD format.',
+        step: 'invoice_creation',
+      },
+    };
+  }
+
+  const differenceInDays = calculateDateDifferenceInDays(
+    parsedIssueDate,
+    today,
+  );
+
+  if (differenceInDays < 0) {
+    return {
+      valid: false,
+      blocker: {
+        code: 'INVALID_INVOICE_ISSUE_DATE',
+        message: 'issueDate cannot be in the future.',
+        step: 'invoice_creation',
+      },
+    };
+  }
+
+  if (differenceInDays > 10) {
+    return {
+      valid: false,
+      blocker: {
+        code: 'INVALID_INVOICE_ISSUE_DATE',
+        message: 'issueDate cannot be older than 10 days.',
+        step: 'invoice_creation',
+      },
+    };
+  }
+
+  return {
+    valid: true,
+    issueDate,
+  };
+}
+
+function parseIsoDateOnly(value: string): Date | null {
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (match === null) {
+    return null;
+  }
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) {
+    return null;
+  }
+
+  return date;
+}
+
+function calculateDateDifferenceInDays(from: Date, to: Date): number {
+  const millisecondsPerDay = 24 * 60 * 60 * 1_000;
+  return Math.round((to.getTime() - from.getTime()) / millisecondsPerDay);
 }
 
 function getErrorMessage(error: unknown): string {

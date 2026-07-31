@@ -52,6 +52,18 @@ export class TlqvInvoiceFacturasController {
           description:
             'Cuando es true, nunca emite la factura aunque stopAfter sea invoice_creation.',
         },
+        issueDate: {
+          type: 'string',
+          example: '2026-07-25',
+          description:
+            'Fecha de emisión en formato YYYY-MM-DD. Opcional. Permite hasta 10 días hacia atrás desde la fecha actual.',
+        },
+        fechaFactura: {
+          type: 'string',
+          example: '2026-07-25',
+          description:
+            'Alias operativo de issueDate. No enviar ambos con valores diferentes.',
+        },
       },
       example: {
         tlqvCode: 'TLQV-1569',
@@ -93,12 +105,15 @@ export class TlqvInvoiceFacturasController {
       tlqvCode?: string;
       stopAfter?: string;
       dryRun?: boolean;
+      issueDate?: string;
+      fechaFactura?: string;
     } = {},
   ) {
     return this.tlqvInvoiceFacturasService.createFromTlqv({
       tlqvCode: readRequiredBodyString(body.tlqvCode, 'tlqvCode'),
       stopAfter: readOptionalStopAfter(body.stopAfter),
       dryRun: readOptionalBoolean(body.dryRun, 'dryRun'),
+      issueDate: readOptionalIssueDate(body.issueDate, body.fechaFactura),
     });
   }
 
@@ -172,6 +187,45 @@ function readOptionalBoolean(
   }
 
   return value;
+}
+
+function readOptionalIssueDate(
+  issueDate: string | undefined,
+  fechaFactura: string | undefined,
+): string | undefined {
+  const normalizedIssueDate = readOptionalBodyString(issueDate);
+  const normalizedFechaFactura = readOptionalBodyString(fechaFactura);
+
+  if (
+    normalizedIssueDate !== undefined &&
+    normalizedFechaFactura !== undefined &&
+    normalizedIssueDate !== normalizedFechaFactura
+  ) {
+    throw new BadRequestException(
+      'issueDate and fechaFactura cannot have different values',
+    );
+  }
+
+  const value = normalizedIssueDate ?? normalizedFechaFactura;
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    throw new BadRequestException(
+      'issueDate must have YYYY-MM-DD format',
+    );
+  }
+
+  return value;
+}
+
+function readOptionalBodyString(value: string | undefined): string | undefined {
+  if (value === undefined || value.trim() === '') {
+    return undefined;
+  }
+
+  return value.trim();
 }
 
 function readRequiredPositiveInteger(value: string, field: string): number {

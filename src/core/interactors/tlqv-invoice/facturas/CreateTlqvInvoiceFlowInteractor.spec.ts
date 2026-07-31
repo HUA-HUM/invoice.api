@@ -129,6 +129,7 @@ describe('CreateTlqvInvoiceFlowInteractor', () => {
       tlqvCode: 'TLQV-1569',
       stopAfter: 'invoice_creation',
       dryRun: false,
+      issueDate: '2026-07-25',
     });
 
     expect(result.status).toBe('completed');
@@ -137,10 +138,74 @@ describe('CreateTlqvInvoiceFlowInteractor', () => {
         type: 'Factura',
         customerId: 10270718,
         pointOfSaleId: 216731,
-        issueDate: '2026-07-30',
+        issueDate: '2026-07-25',
+        dueDate: '2026-07-25',
       }),
     });
     expect(result.createdInvoice?.invoice.transaccionId).toBe(75226596);
+  });
+
+  it('uses today as issue date when no custom issue date is sent', async () => {
+    const dependencies = createDependencies();
+    const interactor = createInteractor(dependencies);
+
+    const result = await interactor.execute({
+      tlqvCode: 'TLQV-1569',
+      stopAfter: 'invoice_creation',
+      dryRun: true,
+    });
+
+    expect(result.status).toBe('completed');
+    expect(result.invoiceBuild?.invoice.issueDate).toBe('2026-07-30');
+    expect(result.invoiceBuild?.invoice.dueDate).toBe('2026-07-30');
+  });
+
+  it('blocks future issue dates before creating a cliente', async () => {
+    const dependencies = createDependencies();
+    const interactor = createInteractor(dependencies);
+
+    const result = await interactor.execute({
+      tlqvCode: 'TLQV-1569',
+      stopAfter: 'invoice_creation',
+      issueDate: '2026-07-31',
+    });
+
+    expect(result.status).toBe('blocked');
+    expect(dependencies.createCliente.execute).not.toHaveBeenCalled();
+    if (result.status !== 'blocked') {
+      throw new Error('Expected blocked response');
+    }
+    expect(result.blockers).toEqual([
+      {
+        code: 'INVALID_INVOICE_ISSUE_DATE',
+        message: 'issueDate cannot be in the future.',
+        step: 'invoice_creation',
+      },
+    ]);
+  });
+
+  it('blocks issue dates older than 10 days before creating a cliente', async () => {
+    const dependencies = createDependencies();
+    const interactor = createInteractor(dependencies);
+
+    const result = await interactor.execute({
+      tlqvCode: 'TLQV-1569',
+      stopAfter: 'invoice_creation',
+      issueDate: '2026-07-19',
+    });
+
+    expect(result.status).toBe('blocked');
+    expect(dependencies.createCliente.execute).not.toHaveBeenCalled();
+    if (result.status !== 'blocked') {
+      throw new Error('Expected blocked response');
+    }
+    expect(result.blockers).toEqual([
+      {
+        code: 'INVALID_INVOICE_ISSUE_DATE',
+        message: 'issueDate cannot be older than 10 days.',
+        step: 'invoice_creation',
+      },
+    ]);
   });
 });
 
