@@ -45,6 +45,10 @@ export interface CreateXubioClienteCommand {
   cliente: XubioClientePayload;
 }
 
+export interface FindXubioClienteByNameCommand {
+  nombre: string;
+}
+
 export interface XubioCliente {
   clienteId: number;
   nombre: string;
@@ -72,6 +76,11 @@ export interface CreateXubioClienteResponse {
   cliente?: XubioCliente;
   alreadyExistsDetail?: string;
   rawPayload?: unknown;
+}
+
+export interface FindXubioClienteResponse {
+  clientes: XubioCliente[];
+  rawPayload: unknown;
 }
 
 export interface CreateXubioClienteFromFiscalInfoCommand {

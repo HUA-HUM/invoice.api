@@ -2,6 +2,7 @@ import { ConfigService } from '@nestjs/config';
 import { CachedXubioAccessTokenProvider } from '../../../../core/driver/repository/xubio/auth/CachedXubioAccessTokenProvider';
 import { GetAccessTokenRepository } from '../../../../core/driver/repository/xubio/auth/GetAccessTokenRepository';
 import { CreateClienteRepository } from '../../../../core/driver/repository/xubio/clientes/CreateClienteRepository';
+import { FindClienteRepository } from '../../../../core/driver/repository/xubio/clientes/FindClienteRepository';
 import type { XubioRequestRetryOptions } from '../../../../core/driver/repository/xubio/XubioRequestRetry';
 import {
   readNumberConfig,
@@ -27,6 +28,31 @@ export function createXubioCreateClienteRepository(
   const onAuthorizationFailure = () => tokenProvider.invalidateAccessToken();
 
   return new CreateClienteRepository({
+    baseUrl: xubioBaseUrl,
+    accessTokenProvider,
+    onAuthorizationFailure,
+    retryOptions,
+  });
+}
+
+export function createXubioFindClienteRepository(
+  configService: ConfigService,
+): FindClienteRepository {
+  const xubioBaseUrl = readOptionalConfig(configService, 'XUBIO_BASE_URL');
+  const retryOptions = readXubioRetryOptions(configService);
+  const tokenRepository = new GetAccessTokenRepository({
+    baseUrl: xubioBaseUrl,
+    basicAuthorizationToken: readRequiredConfig(
+      configService,
+      'XUBIO_BASIC_AUTHORIZATION',
+    ),
+    retryOptions,
+  });
+  const tokenProvider = new CachedXubioAccessTokenProvider(tokenRepository);
+  const accessTokenProvider = () => tokenProvider.getAccessToken();
+  const onAuthorizationFailure = () => tokenProvider.invalidateAccessToken();
+
+  return new FindClienteRepository({
     baseUrl: xubioBaseUrl,
     accessTokenProvider,
     onAuthorizationFailure,

@@ -4,6 +4,7 @@ import type { IMadreXubioComprobantesRepository } from '../../../adapters/reposi
 import type { IGetTlqvOrderDetailsRepository } from '../../../adapters/repositories/tlqv/order-details/IGetTlqvOrderDetailsRepository';
 import type { IGetTusFacturasAfipInfoRepository } from '../../../adapters/repositories/tus-facturas/afip-info/IGetTusFacturasAfipInfoRepository';
 import type { ICreateXubioClienteRepository } from '../../../adapters/repositories/xubio/clientes/ICreateXubioClienteRepository';
+import type { IFindXubioClienteRepository } from '../../../adapters/repositories/xubio/clientes/IFindXubioClienteRepository';
 import type {
   TlqvOrderBuyerData,
   TlqvOrderDetails,
@@ -14,7 +15,10 @@ import type {
   TusFacturasAfipInfoInvalidDocument,
   TusFacturasDocumentoTipo,
 } from '../../../entities/tus-facturas/afip-info/TusFacturasAfipInfo';
-import type { CreateXubioClienteResponse } from '../../../entities/xubio/clientes/XubioCliente';
+import type {
+  CreateXubioClienteResponse,
+  XubioCliente,
+} from '../../../entities/xubio/clientes/XubioCliente';
 import { CreateXubioClienteInteractor } from '../../xubio/clientes/CreateXubioClienteInteractor';
 import { GetTusFacturasAfipInfoInteractor } from '../../tus-facturas/GetTusFacturasAfipInfoInteractor';
 import {
@@ -31,7 +35,9 @@ export type CreateXubioClienteFromTlqvBlockerCode =
   | 'ORDER_DETAILS_NOT_FOUND'
   | 'MISSING_BUYER_CUIT'
   | 'MISSING_FISCAL_RAZON_SOCIAL'
-  | 'MISSING_FISCAL_CONDICION_IMPOSITIVA';
+  | 'MISSING_FISCAL_CONDICION_IMPOSITIVA'
+  | 'XUBIO_EXISTING_CLIENT_LOOKUP_FAILED'
+  | 'XUBIO_EXISTING_CLIENT_NOT_FOUND';
 
 export interface CreateXubioClienteFromTlqvCommand {
   tlqvCode: string;
@@ -79,6 +85,7 @@ export class CreateXubioClienteFromTlqvInteractor {
     private readonly createXubioClienteRepository: ICreateXubioClienteRepository,
     private readonly invoiceClientIssueRepository?: IInvoiceClientIssueRepository,
     private readonly getNow: () => Date = () => new Date(),
+    private readonly findXubioClienteRepository?: IFindXubioClienteRepository,
   ) {}
 
   async execute(
@@ -224,7 +231,7 @@ export class CreateXubioClienteFromTlqvInteractor {
       };
     }
 
-    const xubioClienteResult = await new CreateXubioClienteInteractor(
+    let xubioClienteResult = await new CreateXubioClienteInteractor(
       this.createXubioClienteRepository,
       this.invoiceClientIssueRepository,
       this.getNow,
@@ -239,6 +246,63 @@ export class CreateXubioClienteFromTlqvInteractor {
       codigoPostal: buyerData.codigoPostal,
       provincia: buyerData.provincia,
     });
+
+    if (
+      xubioClienteResult.status === 'already_exists' &&
+      xubioClienteResult.cliente === undefined &&
+      this.findXubioClienteRepository !== undefined
+    ) {
+      let existingCliente: XubioCliente | undefined;
+      try {
+        existingCliente = await this.findExistingXubioCliente({
+          cuitDigits: cuitCompradorDigits,
+          buyerName: buyerData.nombreDestinatario,
+          razonSocial: fiscalInfo.razonSocial as string,
+        });
+      } catch (error: unknown) {
+        return {
+          status: 'blocked',
+          canContinue: false,
+          tlqvCode: prepare.tlqvCode,
+          prepare,
+          orderDetails,
+          buyerData,
+          fiscalInfoResponse,
+          documentoTipo,
+          blockers: [
+            {
+              code: 'XUBIO_EXISTING_CLIENT_LOOKUP_FAILED',
+              message: `Xubio cliente already exists, but the existing client lookup failed. ${readErrorMessage(error)}`,
+            },
+          ],
+        };
+      }
+
+      if (existingCliente === undefined) {
+        return {
+          status: 'blocked',
+          canContinue: false,
+          tlqvCode: prepare.tlqvCode,
+          prepare,
+          orderDetails,
+          buyerData,
+          fiscalInfoResponse,
+          documentoTipo,
+          blockers: [
+            {
+              code: 'XUBIO_EXISTING_CLIENT_NOT_FOUND',
+              message:
+                'Xubio cliente already exists, but it could not be found by CUIT or usrCode.',
+            },
+          ],
+        };
+      }
+
+      xubioClienteResult = {
+        ...xubioClienteResult,
+        cliente: existingCliente,
+      };
+    }
 
     return {
       status: xubioClienteResult.status,
@@ -265,6 +329,37 @@ export class CreateXubioClienteFromTlqvInteractor {
     }
 
     return null;
+  }
+
+  private async findExistingXubioCliente(command: {
+    cuitDigits: string;
+    buyerName?: string | null;
+    razonSocial?: string | null;
+  }): Promise<XubioCliente | undefined> {
+    if (this.findXubioClienteRepository === undefined) {
+      return undefined;
+    }
+
+    const candidates = buildClienteSearchCandidates({
+      cuitDigits: command.cuitDigits,
+      buyerName: command.buyerName,
+      razonSocial: command.razonSocial,
+    });
+
+    for (const nombre of candidates) {
+      const response = await this.findXubioClienteRepository.findByName({
+        nombre,
+      });
+      const match = response.clientes.find((cliente) =>
+        matchesExistingCliente(cliente, command.cuitDigits),
+      );
+
+      if (match !== undefined) {
+        return match;
+      }
+    }
+
+    return undefined;
   }
 }
 
@@ -296,6 +391,76 @@ function inferDocumentoTipo(digits: string): TusFacturasDocumentoTipo {
   return prefix >= 30 ? 'CUIL' : 'CUIT';
 }
 
+function buildClienteSearchCandidates(command: {
+  cuitDigits: string;
+  buyerName?: string | null;
+  razonSocial?: string | null;
+}): string[] {
+  return Array.from(
+    new Set(
+      [
+        `TLQV-${command.cuitDigits}`,
+        command.buyerName,
+        command.razonSocial,
+        formatCuit(command.cuitDigits),
+        command.cuitDigits,
+      ]
+        .map((value) => normalizeOptionalString(value))
+        .filter((value): value is string => value !== null),
+    ),
+  );
+}
+
+function matchesExistingCliente(
+  cliente: XubioCliente,
+  cuitDigits: string,
+): boolean {
+  const expectedUsrCode = normalizeForComparison(`TLQV-${cuitDigits}`);
+
+  return (
+    normalizeForComparison(cliente.usrCode) === expectedUsrCode ||
+    normalizeDocumentDigits(cliente.cuit) === cuitDigits ||
+    normalizeDocumentDigits(cliente.dni) === cuitDigits
+  );
+}
+
+function normalizeDocumentDigits(value: string | null | undefined): string {
+  return value?.replace(/\D/g, '') ?? '';
+}
+
+function formatCuit(digits: string): string {
+  return `${digits.slice(0, 2)}-${digits.slice(2, 10)}-${digits.slice(10)}`;
+}
+
+function normalizeForComparison(value: string | null | undefined): string {
+  return (
+    value
+      ?.normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .trim()
+      .toUpperCase() ?? ''
+  );
+}
+
+function normalizeOptionalString(
+  value: string | null | undefined,
+): string | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  const normalizedValue = value.trim();
+  return normalizedValue === '' ? null : normalizedValue;
+}
+
 function isBlank(value: string | null | undefined): boolean {
   return value === undefined || value === null || value.trim() === '';
+}
+
+function readErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim() !== '') {
+    return error.message;
+  }
+
+  return 'unknown error';
 }

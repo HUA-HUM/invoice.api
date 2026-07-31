@@ -4,6 +4,7 @@ import type { IMadreXubioComprobantesRepository } from '../../../adapters/reposi
 import type { IGetTlqvOrderDetailsRepository } from '../../../adapters/repositories/tlqv/order-details/IGetTlqvOrderDetailsRepository';
 import type { IGetTusFacturasAfipInfoRepository } from '../../../adapters/repositories/tus-facturas/afip-info/IGetTusFacturasAfipInfoRepository';
 import type { ICreateXubioClienteRepository } from '../../../adapters/repositories/xubio/clientes/ICreateXubioClienteRepository';
+import type { IFindXubioClienteRepository } from '../../../adapters/repositories/xubio/clientes/IFindXubioClienteRepository';
 import type { TlqvOrderBuyerData } from '../../../entities/tlqv/order-details/TlqvOrderDetails';
 import { CreateXubioClienteFromTlqvInteractor } from '../clientes/CreateXubioClienteFromTlqvInteractor';
 
@@ -116,6 +117,75 @@ describe('CreateXubioClienteFromTlqvInteractor', () => {
       throw new Error('Expected created response');
     }
     expect(result.orderDetails.source).toBe('flokzu');
+  });
+
+  it('resolves an existing Xubio cliente by CUIT when create reports already_exists', async () => {
+    const repositories = createRepositories();
+    repositories.xubioClientes.create.mockResolvedValue({
+      status: 'already_exists',
+      created: false,
+      alreadyExistsDetail:
+        'Ya existe el código TLQV-27187719572, este ha sido creado anteriormente como TLQV-27187719572',
+      rawPayload: {
+        description: 'Ya existe el código TLQV-27187719572',
+      },
+    });
+    repositories.xubioClientesFinder.findByName.mockResolvedValue({
+      clientes: [
+        {
+          clienteId: 10256469,
+          nombre: 'Tania Silvia Coronel Alferrano',
+          razonSocial: 'ARTURO GUTIERREZ',
+          usrCode: 'TLQV-27187719572',
+          cuit: '27-18771957-2',
+          rawPayload: {},
+        },
+      ],
+      rawPayload: [],
+    });
+    const interactor = createInteractor(repositories);
+
+    const result = await interactor.execute({ tlqvCode: 'TLQV-14921' });
+
+    expect(result.status).toBe('already_exists');
+    if (result.status !== 'already_exists') {
+      throw new Error('Expected already_exists response');
+    }
+    expect(repositories.xubioClientesFinder.findByName).toHaveBeenCalledWith({
+      nombre: 'TLQV-27187719572',
+    });
+    expect(result.xubioClienteResult.cliente?.clienteId).toBe(10256469);
+    expect(result.canContinue).toBe(true);
+  });
+
+  it('blocks when an existing Xubio cliente cannot be found after already_exists', async () => {
+    const repositories = createRepositories();
+    repositories.xubioClientes.create.mockResolvedValue({
+      status: 'already_exists',
+      created: false,
+      alreadyExistsDetail:
+        'Ya existe el código TLQV-27187719572, este ha sido creado anteriormente como TLQV-27187719572',
+      rawPayload: {
+        description: 'Ya existe el código TLQV-27187719572',
+      },
+    });
+    repositories.xubioClientesFinder.findByName.mockResolvedValue({
+      clientes: [],
+      rawPayload: [],
+    });
+    const interactor = createInteractor(repositories);
+
+    const result = await interactor.execute({ tlqvCode: 'TLQV-14921' });
+
+    expect(result.status).toBe('blocked');
+    if (result.status !== 'blocked') {
+      throw new Error('Expected blocked response');
+    }
+    expect(result.blockers).toEqual([
+      expect.objectContaining({
+        code: 'XUBIO_EXISTING_CLIENT_NOT_FOUND',
+      }),
+    ]);
   });
 
   it('returns blocked when prepare validation blocks the TLQV', async () => {
@@ -266,6 +336,7 @@ function createInteractor(repositories: ReturnType<typeof createRepositories>) {
     repositories.xubioClientes,
     repositories.issues,
     () => new Date('2026-07-07T12:00:00.000Z'),
+    repositories.xubioClientesFinder,
   );
 }
 
@@ -286,6 +357,9 @@ function createRepositories(): {
     getAfipInfo: jest.Mock;
   };
   xubioClientes: ICreateXubioClienteRepository & { create: jest.Mock };
+  xubioClientesFinder: IFindXubioClienteRepository & {
+    findByName: jest.Mock;
+  };
   issues: IInvoiceClientIssueRepository & { upsert: jest.Mock };
 } {
   return {
@@ -348,6 +422,12 @@ function createRepositories(): {
           rawPayload: {},
         },
         rawPayload: {},
+      }),
+    },
+    xubioClientesFinder: {
+      findByName: jest.fn().mockResolvedValue({
+        clientes: [],
+        rawPayload: [],
       }),
     },
     issues: {

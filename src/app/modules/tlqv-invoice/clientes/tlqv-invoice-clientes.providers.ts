@@ -15,7 +15,10 @@ import {
   createMadreInvoiceClientIssuesRepository,
   createMadreXubioComprobantesRepository,
 } from '../../shared/madre/madre-repositories.factory';
-import { createXubioCreateClienteRepository } from '../../xubio/shared/xubio-cliente-repository.factory';
+import {
+  createXubioCreateClienteRepository,
+  createXubioFindClienteRepository,
+} from '../../xubio/shared/xubio-cliente-repository.factory';
 
 export const CREATE_XUBIO_CLIENTE_FROM_TLQV_INTERACTOR = Symbol(
   'CREATE_XUBIO_CLIENTE_FROM_TLQV_INTERACTOR',
@@ -62,6 +65,7 @@ export const tlqvInvoiceClientesInteractorProviders: Provider[] = [
         createXubioCreateClienteRepository(configService),
         createMadreInvoiceClientIssuesRepository(configService),
         () => new Date(),
+        createXubioFindClienteRepository(configService),
       ),
   },
   {
