@@ -397,6 +397,29 @@ describe('CreateXubioClienteFromTlqvInteractor', () => {
     });
     expect(repositories.xubioClientes.create).not.toHaveBeenCalled();
   });
+
+  it('returns blocked instead of throwing when TusFacturas is unavailable', async () => {
+    const repositories = createRepositories();
+    repositories.tusFacturas.getAfipInfo.mockRejectedValue(
+      new Error('timeout of 20000ms exceeded'),
+    );
+    const interactor = createInteractor(repositories);
+
+    const result = await interactor.execute({ tlqvCode: 'TLQV-14921' });
+
+    expect(result.status).toBe('blocked');
+    if (result.status !== 'blocked') {
+      throw new Error('Expected blocked response');
+    }
+    expect(result.blockers).toEqual([
+      expect.objectContaining({
+        code: 'FISCAL_INFO_UNAVAILABLE',
+        message:
+          'No se pudo validar la condición fiscal en TusFacturas. timeout of 20000ms exceeded',
+      }),
+    ]);
+    expect(repositories.xubioClientes.create).not.toHaveBeenCalled();
+  });
 });
 
 function createInteractor(repositories: ReturnType<typeof createRepositories>) {

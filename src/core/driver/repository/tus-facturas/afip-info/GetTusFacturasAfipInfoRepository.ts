@@ -1,4 +1,4 @@
-import axios, { type AxiosInstance } from 'axios';
+import axios, { type AxiosInstance, type AxiosResponse } from 'axios';
 import type { IGetTusFacturasAfipInfoRepository } from '../../../../adapters/repositories/tus-facturas/afip-info/IGetTusFacturasAfipInfoRepository';
 import type {
   GetTusFacturasAfipInfoCommand,
@@ -9,8 +9,11 @@ import type {
 
 const DEFAULT_BASE_URL = 'https://www.tusfacturas.app';
 const DEFAULT_TIMEOUT_IN_MILLISECONDS = 20_000;
+const DEFAULT_RETRY_ATTEMPTS = 2;
+const DEFAULT_RETRY_DELAY_IN_MILLISECONDS = 250;
 const AFIP_INFO_PATH = '/app/api/v2/clientes/afip-info';
 const DOCUMENTO_DIGITS_LENGTH = 11;
+const RETRYABLE_STATUS_CODES = new Set([408, 429, 500, 502, 503, 504]);
 
 const FISCAL_INFO_FIELDS = [
   'razon_social',
@@ -29,6 +32,8 @@ export interface GetTusFacturasAfipInfoRepositoryOptions {
   apiToken?: string;
   cookie?: string;
   timeoutInMilliseconds?: number;
+  retryAttempts?: number;
+  retryDelayInMilliseconds?: number;
   httpClient?: AxiosInstance;
 }
 
@@ -71,12 +76,18 @@ export class GetTusFacturasAfipInfoRepository implements IGetTusFacturasAfipInfo
   private readonly apiKey?: string;
   private readonly apiToken?: string;
   private readonly cookie?: string;
+  private readonly retryAttempts: number;
+  private readonly retryDelayInMilliseconds: number;
 
   constructor(options: GetTusFacturasAfipInfoRepositoryOptions = {}) {
     this.userToken = options.userToken;
     this.apiKey = options.apiKey;
     this.apiToken = options.apiToken;
     this.cookie = options.cookie;
+    this.retryAttempts = normalizeRetryAttempts(options.retryAttempts);
+    this.retryDelayInMilliseconds = normalizeRetryDelay(
+      options.retryDelayInMilliseconds,
+    );
     this.httpClient =
       options.httpClient ??
       axios.create({
@@ -105,12 +116,9 @@ export class GetTusFacturasAfipInfoRepository implements IGetTusFacturasAfipInfo
     const documentoNro = formatDocumentoNro(documentoNroDigits);
 
     try {
-      const response = await this.httpClient.post<unknown>(
-        AFIP_INFO_PATH,
-        this.buildPayload(documentoNro, documentoTipo),
-        {
-          headers: this.buildHeaders(),
-        },
+      const response = await this.postAfipInfoWithRetry(
+        documentoNro,
+        documentoTipo,
       );
 
       return parseAfipInfoResponse(
@@ -129,6 +137,37 @@ export class GetTusFacturasAfipInfoRepository implements IGetTusFacturasAfipInfo
 
       throw buildRequestError(documentoNroDigits, error);
     }
+  }
+
+  private async postAfipInfoWithRetry(
+    documentoNro: string,
+    documentoTipo: TusFacturasDocumentoTipo,
+  ): Promise<AxiosResponse<unknown>> {
+    let lastError: unknown;
+
+    for (let attempt = 1; attempt <= this.retryAttempts; attempt += 1) {
+      try {
+        return await this.httpClient.post<unknown>(
+          AFIP_INFO_PATH,
+          this.buildPayload(documentoNro, documentoTipo),
+          {
+            headers: this.buildHeaders(),
+          },
+        );
+      } catch (error: unknown) {
+        lastError = error;
+        if (
+          attempt >= this.retryAttempts ||
+          !isRetryableTusFacturasRequestError(error)
+        ) {
+          throw error;
+        }
+
+        await wait(this.retryDelayInMilliseconds);
+      }
+    }
+
+    throw lastError;
   }
 
   private buildPayload(
@@ -310,6 +349,49 @@ function buildRequestError(
   }
 
   return new TusFacturasAfipInfoRequestError(documentoNro, 'unknown error');
+}
+
+function isRetryableTusFacturasRequestError(error: unknown): boolean {
+  if (!axios.isAxiosError(error)) {
+    return false;
+  }
+
+  const status = error.response?.status;
+  return status === undefined || RETRYABLE_STATUS_CODES.has(status);
+}
+
+function wait(milliseconds: number): Promise<void> {
+  if (milliseconds <= 0) {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve) => {
+    setTimeout(resolve, milliseconds);
+  });
+}
+
+function normalizeRetryAttempts(value: number | undefined): number {
+  if (value === undefined) {
+    return DEFAULT_RETRY_ATTEMPTS;
+  }
+
+  if (!Number.isInteger(value) || value < 1) {
+    throw new RangeError('retryAttempts must be a positive integer');
+  }
+
+  return value;
+}
+
+function normalizeRetryDelay(value: number | undefined): number {
+  if (value === undefined) {
+    return DEFAULT_RETRY_DELAY_IN_MILLISECONDS;
+  }
+
+  if (!Number.isInteger(value) || value < 0) {
+    throw new RangeError('retryDelayInMilliseconds must be a non-negative integer');
+  }
+
+  return value;
 }
 
 function serializeResponseBody(value: unknown): string {

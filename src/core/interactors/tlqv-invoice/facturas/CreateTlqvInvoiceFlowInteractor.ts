@@ -492,9 +492,7 @@ function buildClienteFlowBlockers(
     return [
       {
         code: 'INVALID_FISCAL_DOCUMENT',
-        message:
-          clienteFlow.invalidDocument.message ??
-          `${clienteFlow.tlqvCode} tiene un documento fiscal inválido.`,
+        message: `${clienteFlow.tlqvCode} tiene un documento fiscal inválido. Se guarda como issue de cliente en Madre y se saltea la creación de factura. ${clienteFlow.invalidDocument.message}`,
         step: 'client',
       },
     ];

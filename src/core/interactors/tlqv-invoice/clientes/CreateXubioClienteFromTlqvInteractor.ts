@@ -34,6 +34,7 @@ export type CreateXubioClienteFromTlqvBlockerCode =
   | PrepareTlqvInvoiceBlocker['code']
   | 'ORDER_DETAILS_NOT_FOUND'
   | 'MISSING_BUYER_CUIT'
+  | 'FISCAL_INFO_UNAVAILABLE'
   | 'MISSING_FISCAL_RAZON_SOCIAL'
   | 'MISSING_FISCAL_CONDICION_IMPOSITIVA'
   | 'XUBIO_EXISTING_CLIENT_LOOKUP_FAILED'
@@ -181,59 +182,79 @@ export class CreateXubioClienteFromTlqvInteractor {
     }
 
     const documentoTipo = inferDocumentoTipo(cuitCompradorDigits);
-    const fiscalInfoResponse = await new GetTusFacturasAfipInfoInteractor(
-      this.tusFacturasAfipInfoRepository,
-      this.invoiceClientIssueRepository,
-      this.getNow,
-    ).execute({
-      tlqvCode: prepare.tlqvCode,
-      documentoNro: cuitCompradorDigits,
-      documentoTipo,
-      issueContext: {
-        saleNumber: orderDetails.saleNumber ?? prepare.stockBueItem?.saleNumber,
-        buyerName: buyerData.nombreDestinatario,
-        email: buyerData.email,
-        metadata: {
-          source: 'create_xubio_cliente_from_tlqv',
-          orderDetailsSource: orderDetails.source,
-          orderDetails: {
-            tlqvCode: orderDetails.tlqvCode,
-            saleNumber: orderDetails.saleNumber,
-            source: orderDetails.source,
+    let fiscalInfoResponse: GetTusFacturasAfipInfoResponse;
+    try {
+      fiscalInfoResponse = await new GetTusFacturasAfipInfoInteractor(
+        this.tusFacturasAfipInfoRepository,
+        this.invoiceClientIssueRepository,
+        this.getNow,
+      ).execute({
+        tlqvCode: prepare.tlqvCode,
+        documentoNro: cuitCompradorDigits,
+        documentoTipo,
+        issueContext: {
+          saleNumber:
+            orderDetails.saleNumber ?? prepare.stockBueItem?.saleNumber,
+          buyerName: buyerData.nombreDestinatario,
+          email: buyerData.email,
+          metadata: {
+            source: 'create_xubio_cliente_from_tlqv',
+            orderDetailsSource: orderDetails.source,
+            orderDetails: {
+              tlqvCode: orderDetails.tlqvCode,
+              saleNumber: orderDetails.saleNumber,
+              source: orderDetails.source,
+            },
+            stockBue: {
+              rowNumber: prepare.stockBueItem?.rowNumber,
+              instruction: prepare.stockBueItem?.instruction,
+              description: prepare.stockBueItem?.description,
+              fechaRecepcion: prepare.stockBueItem?.fechaRecepcion,
+              fechaSalida: prepare.stockBueItem?.fechaSalida,
+              fechaLimite: prepare.stockBueItem?.fechaLimite,
+              fechaInstruccion: prepare.stockBueItem?.fechaInstruccion,
+            },
+            buyerData: {
+              nombreDestinatario: buyerData.nombreDestinatario,
+              direccion: buyerData.direccion,
+              ciudad: buyerData.ciudad,
+              provincia: buyerData.provincia,
+              codigoPostal: buyerData.codigoPostal,
+              telefono: buyerData.telefono,
+              email: buyerData.email,
+            },
+            flokzuBuyerData:
+              orderDetails.source === 'flokzu'
+                ? {
+                    nombreDestinatario: buyerData.nombreDestinatario,
+                    direccion: buyerData.direccion,
+                    ciudad: buyerData.ciudad,
+                    provincia: buyerData.provincia,
+                    codigoPostal: buyerData.codigoPostal,
+                    telefono: buyerData.telefono,
+                    email: buyerData.email,
+                  }
+                : undefined,
           },
-          stockBue: {
-            rowNumber: prepare.stockBueItem?.rowNumber,
-            instruction: prepare.stockBueItem?.instruction,
-            description: prepare.stockBueItem?.description,
-            fechaRecepcion: prepare.stockBueItem?.fechaRecepcion,
-            fechaSalida: prepare.stockBueItem?.fechaSalida,
-            fechaLimite: prepare.stockBueItem?.fechaLimite,
-            fechaInstruccion: prepare.stockBueItem?.fechaInstruccion,
-          },
-          buyerData: {
-            nombreDestinatario: buyerData.nombreDestinatario,
-            direccion: buyerData.direccion,
-            ciudad: buyerData.ciudad,
-            provincia: buyerData.provincia,
-            codigoPostal: buyerData.codigoPostal,
-            telefono: buyerData.telefono,
-            email: buyerData.email,
-          },
-          flokzuBuyerData:
-            orderDetails.source === 'flokzu'
-              ? {
-                  nombreDestinatario: buyerData.nombreDestinatario,
-                  direccion: buyerData.direccion,
-                  ciudad: buyerData.ciudad,
-                  provincia: buyerData.provincia,
-                  codigoPostal: buyerData.codigoPostal,
-                  telefono: buyerData.telefono,
-                  email: buyerData.email,
-                }
-              : undefined,
         },
-      },
-    });
+      });
+    } catch (error: unknown) {
+      return {
+        status: 'blocked',
+        canContinue: false,
+        tlqvCode: prepare.tlqvCode,
+        prepare,
+        orderDetails,
+        buyerData,
+        documentoTipo,
+        blockers: [
+          {
+            code: 'FISCAL_INFO_UNAVAILABLE',
+            message: `No se pudo validar la condición fiscal en TusFacturas. ${readErrorMessage(error)}`,
+          },
+        ],
+      };
+    }
 
     if (fiscalInfoResponse.status === 'invalid_document') {
       return {

@@ -72,6 +72,51 @@ describe('CreateTlqvInvoiceFlowInteractor', () => {
     expect(dependencies.madreSheet.getByTlqvCode).not.toHaveBeenCalled();
   });
 
+  it('skips the TLQV invoice flow when client creation stores an invalid fiscal document issue', async () => {
+    const dependencies = createDependencies({
+      clienteFlow: {
+        status: 'invalid_fiscal_document',
+        canContinue: false,
+        tlqvCode: 'TLQV-1569',
+        prepare: {} as never,
+        invalidDocument: {
+          documentoNro: '26172071',
+          documentoNroDigits: '26172071',
+          documentoTipo: 'CUIT',
+          message: 'documentoNro must contain exactly 11 digits',
+          messages: ['documentoNro must contain exactly 11 digits'],
+          rawPayload: {
+            error: 'INVALID_DOCUMENT_LENGTH',
+          },
+        },
+      },
+    });
+    const interactor = createInteractor(dependencies);
+
+    const result = await interactor.execute({
+      tlqvCode: 'TLQV-1569',
+      stopAfter: 'invoice_creation',
+      dryRun: false,
+    });
+
+    expect(result.status).toBe('blocked');
+    expect(result.canContinue).toBe(false);
+    if (result.status !== 'blocked') {
+      throw new Error('Expected blocked response');
+    }
+    expect(result.blockers).toEqual([
+      {
+        code: 'INVALID_FISCAL_DOCUMENT',
+        message:
+          'TLQV-1569 tiene un documento fiscal inválido. Se guarda como issue de cliente en Madre y se saltea la creación de factura. documentoNro must contain exactly 11 digits',
+        step: 'client',
+      },
+    ]);
+    expect(dependencies.tlqvSheet.getByCode).not.toHaveBeenCalled();
+    expect(dependencies.madreSheet.getByTlqvCode).not.toHaveBeenCalled();
+    expect(dependencies.createInvoice.create).not.toHaveBeenCalled();
+  });
+
   it('blocks when one spreadsheet source item is missing', async () => {
     const dependencies = createDependencies();
     dependencies.madreSheet.getByTlqvCode.mockResolvedValue({

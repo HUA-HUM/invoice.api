@@ -219,6 +219,28 @@ describe('GetTusFacturasAfipInfoRepository', () => {
     });
   });
 
+  it('retries transient TusFacturas request errors', async () => {
+    const post = jest
+      .fn()
+      .mockRejectedValueOnce(createAxiosError(503, 'Service unavailable'))
+      .mockResolvedValueOnce({ data: createDirectAfipInfoResponse() });
+    const repository = new GetTusFacturasAfipInfoRepository({
+      userToken: 'user-token',
+      apiKey: 'api-key',
+      apiToken: 'api-token',
+      retryAttempts: 2,
+      retryDelayInMilliseconds: 0,
+      httpClient: { post } as unknown as AxiosInstance,
+    });
+
+    const result = await repository.getAfipInfo({
+      documentoNro: '20-42433388-4',
+    });
+
+    expect(post).toHaveBeenCalledTimes(2);
+    expect(result.status).toBe('found');
+  });
+
   it('rejects a response whose schema is invalid', async () => {
     const post = jest.fn().mockResolvedValue({ data: { ok: true } });
     const repository = new GetTusFacturasAfipInfoRepository({
@@ -273,5 +295,16 @@ function createInvalidDocumentResponse() {
     ],
     apoc_existe: 'NO',
     apoc_info: '',
+  };
+}
+
+function createAxiosError(status: number, message: string) {
+  return {
+    isAxiosError: true,
+    message,
+    response: {
+      status,
+      data: { message },
+    },
   };
 }
