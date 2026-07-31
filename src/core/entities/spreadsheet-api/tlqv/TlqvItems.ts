@@ -9,6 +9,8 @@ export interface TlqvItemData {
   DI: string;
   TE: string;
   IVA: string;
+  'Imp Internos'?: string;
+  'Anti Dumping'?: string;
   'Total Impuestos': string;
   'Total Flete': string;
   'Fijo Liberacion': string;
@@ -65,3 +67,20 @@ export interface GetAllTlqvItemsResponse {
   totalPages: number;
   rows: TlqvItem[];
 }
+
+export interface GetTlqvItemByCodeCommand {
+  tlqvCode: string;
+}
+
+export type GetTlqvItemByCodeResponse =
+  | {
+      found: true;
+      tlqvCode: string;
+      item: TlqvItem;
+    }
+  | {
+      found: false;
+      tlqvCode: string;
+      reason: 'not_found';
+      rawPayload?: unknown;
+    };

@@ -123,6 +123,44 @@ describe('GetTusFacturasAfipInfoRepository', () => {
     expect(result.afipInfo.documentoTipo).toBe('CUIT');
   });
 
+  it('does not reject valid AFIP data when apoc does not exist', async () => {
+    const post = jest.fn().mockResolvedValue({
+      data: {
+        error: 'N',
+        errores: [],
+        razon_social: 'LUIS PAULO FERRARI',
+        condicion_impositiva: 'RESPONSABLE INSCRIPTO',
+        direccion: 'RIVADAVIA 635',
+        localidad: 'MONTE BUEY',
+        codigopostal: 'CP: 2589',
+        provincia: 'CORDOBA',
+        estado: 'ACTIVO',
+        apoc_existe: 'NO',
+        apoc_info: '',
+      },
+    });
+    const repository = new GetTusFacturasAfipInfoRepository({
+      userToken: 'user-token',
+      apiKey: 'api-key',
+      apiToken: 'api-token',
+      httpClient: { post } as unknown as AxiosInstance,
+    });
+
+    const result = await repository.getAfipInfo({
+      documentoNro: '20-21753486-1',
+    });
+
+    expect(result.status).toBe('found');
+    expect(result.found).toBe(true);
+    if (result.status !== 'found') {
+      throw new Error('Expected found response');
+    }
+    expect(result.afipInfo.razonSocial).toBe('LUIS PAULO FERRARI');
+    expect(result.afipInfo.condicionImpositiva).toBe(
+      'RESPONSABLE INSCRIPTO',
+    );
+  });
+
   it('returns invalid_document when TusFacturas cannot recover AFIP data', async () => {
     const post = jest.fn().mockResolvedValue({
       data: createInvalidDocumentResponse(),

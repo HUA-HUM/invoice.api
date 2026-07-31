@@ -226,7 +226,6 @@ function isInvalidDocumentResponse(value: unknown): boolean {
 
   return (
     value.error === 'S' ||
-    value.apoc_existe === 'NO' ||
     extractErrorMessages(value).some((message) =>
       normalizeForComparison(message).includes('NO PUDIMOS OBTENER DATOS'),
     )

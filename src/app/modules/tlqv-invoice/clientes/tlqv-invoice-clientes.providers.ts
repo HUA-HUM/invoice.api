@@ -3,8 +3,8 @@ import { ConfigService } from '@nestjs/config';
 import { GetFlokzuTlqvOrderDetailsRepository } from '../../../../core/driver/repository/flokzu/order-details/GetTlqvOrderDetailsRepository';
 import { GetOpsApiTlqvOrderDetailsRepository } from '../../../../core/driver/repository/ops-api/order-details/GetTlqvOrderDetailsRepository';
 import { GetTusFacturasAfipInfoRepository } from '../../../../core/driver/repository/tus-facturas/afip-info/GetTusFacturasAfipInfoRepository';
-import { CreateXubioConsumidorFinalClienteFromIssueInteractor } from '../../../../core/interactors/tlqv/CreateXubioConsumidorFinalClienteFromIssueInteractor';
-import { CreateXubioClienteFromTlqvInteractor } from '../../../../core/interactors/tlqv/CreateXubioClienteFromTlqvInteractor';
+import { CreateXubioConsumidorFinalClienteFromIssueInteractor } from '../../../../core/interactors/tlqv-invoice/clientes/CreateXubioConsumidorFinalClienteFromIssueInteractor';
+import { CreateXubioClienteFromTlqvInteractor } from '../../../../core/interactors/tlqv-invoice/clientes/CreateXubioClienteFromTlqvInteractor';
 import { StockBueTlqvCacheManagerRepository } from '../../../drivers/cache/stock-bue/stock-bue-tlqv-cache-manager.repository';
 import {
   readNumberConfig,

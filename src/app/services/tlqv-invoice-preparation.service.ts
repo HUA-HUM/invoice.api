@@ -3,7 +3,7 @@ import {
   PrepareTlqvInvoiceInteractor,
   type PrepareTlqvInvoiceCommand,
   type PrepareTlqvInvoiceResponse,
-} from '../../core/interactors/tlqv/PrepareTlqvInvoiceInteractor';
+} from '../../core/interactors/tlqv-invoice/preparacion/PrepareTlqvInvoiceInteractor';
 import { PREPARE_TLQV_INVOICE_INTERACTOR } from '../modules/tlqv-invoice/preparation/tlqv-invoice-preparation.providers';
 
 @Injectable()

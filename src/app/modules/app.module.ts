@@ -4,7 +4,7 @@ import { AppController } from '../controllers/app.controller';
 import { AppService } from '../services/app.service';
 import { StockBueModule } from './stock-bue/stock-bue.module';
 import { TlqvInvoiceClientesModule } from './tlqv-invoice/clientes/tlqv-invoice-clientes.module';
-import { TlqvInvoiceDocumentsModule } from './tlqv-invoice/documents/tlqv-invoice-documents.module';
+import { TlqvInvoiceFacturasModule } from './tlqv-invoice/facturas/tlqv-invoice-facturas.module';
 import { TlqvInvoiceIssuesModule } from './tlqv-invoice/issues/tlqv-invoice-issues.module';
 import { TlqvInvoicePreparationModule } from './tlqv-invoice/preparation/tlqv-invoice-preparation.module';
 import { TusFacturasModule } from './tus-facturas/tus-facturas.module';
@@ -18,7 +18,7 @@ import { XubioComprobantesModule } from './xubio/comprobantes/xubio-comprobantes
     }),
     StockBueModule,
     TlqvInvoiceClientesModule,
-    TlqvInvoiceDocumentsModule,
+    TlqvInvoiceFacturasModule,
     TlqvInvoiceIssuesModule,
     TlqvInvoicePreparationModule,
     TusFacturasModule,

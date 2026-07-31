@@ -3,12 +3,12 @@ import {
   CreateXubioConsumidorFinalClienteFromIssueInteractor,
   type CreateXubioConsumidorFinalClienteFromIssueCommand,
   type CreateXubioConsumidorFinalClienteFromIssueResponse,
-} from '../../core/interactors/tlqv/CreateXubioConsumidorFinalClienteFromIssueInteractor';
+} from '../../core/interactors/tlqv-invoice/clientes/CreateXubioConsumidorFinalClienteFromIssueInteractor';
 import {
   CreateXubioClienteFromTlqvInteractor,
   type CreateXubioClienteFromTlqvCommand,
   type CreateXubioClienteFromTlqvResponse,
-} from '../../core/interactors/tlqv/CreateXubioClienteFromTlqvInteractor';
+} from '../../core/interactors/tlqv-invoice/clientes/CreateXubioClienteFromTlqvInteractor';
 import {
   CREATE_XUBIO_CLIENTE_FROM_TLQV_INTERACTOR,
   CREATE_XUBIO_CONSUMIDOR_FINAL_CLIENTE_FROM_ISSUE_INTERACTOR,

@@ -1,7 +1,7 @@
 import type { Provider } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { MadreXubioComprobantesRepository } from '../../../../core/driver/repository/madre-api/xubio/comprobantes/MadreXubioComprobantesRepository';
-import { PrepareTlqvInvoiceInteractor } from '../../../../core/interactors/tlqv/PrepareTlqvInvoiceInteractor';
+import { PrepareTlqvInvoiceInteractor } from '../../../../core/interactors/tlqv-invoice/preparacion/PrepareTlqvInvoiceInteractor';
 import { StockBueTlqvCacheManagerRepository } from '../../../drivers/cache/stock-bue/stock-bue-tlqv-cache-manager.repository';
 import {
   readNumberConfig,
