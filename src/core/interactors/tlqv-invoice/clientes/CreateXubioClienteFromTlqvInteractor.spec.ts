@@ -119,25 +119,29 @@ describe('CreateXubioClienteFromTlqvInteractor', () => {
     expect(result.orderDetails.source).toBe('flokzu');
   });
 
-  it('resolves an existing Xubio cliente by CUIT when create reports already_exists', async () => {
+  it('uses an existing Xubio cliente before calling TusFacturas or create', async () => {
     const repositories = createRepositories();
-    repositories.xubioClientes.create.mockResolvedValue({
-      status: 'already_exists',
-      created: false,
-      alreadyExistsDetail:
-        'Ya existe el código TLQV-27187719572, este ha sido creado anteriormente como TLQV-27187719572',
-      rawPayload: {
-        description: 'Ya existe el código TLQV-27187719572',
-      },
+    repositories.opsOrderDetails.getByTlqvCode.mockResolvedValue({
+      found: true,
+      orderDetails: createOrderDetails({
+        cuitComprador: '44.482.399',
+        cuitCompradorDigits: '44482399',
+      }),
     });
     repositories.xubioClientesFinder.findByName.mockResolvedValue({
       clientes: [
         {
-          clienteId: 10256469,
+          clienteId: 10270718,
           nombre: 'Tania Silvia Coronel Alferrano',
-          razonSocial: 'ARTURO GUTIERREZ',
-          usrCode: 'TLQV-27187719572',
-          cuit: '27-18771957-2',
+          razonSocial: 'Tania Silvia Coronel Alferrano',
+          identificacionTributaria: {
+            codigo: 'DNI',
+          },
+          categoriaFiscal: {
+            codigo: 'CF',
+            nombre: 'Consumidor Final',
+          },
+          cuit: '44.482.399',
           rawPayload: {},
         },
       ],
@@ -152,8 +156,76 @@ describe('CreateXubioClienteFromTlqvInteractor', () => {
       throw new Error('Expected already_exists response');
     }
     expect(repositories.xubioClientesFinder.findByName).toHaveBeenCalledWith({
+      nombre: 'Tania Silvia Coronel Alferrano',
+    });
+    expect(repositories.tusFacturas.getAfipInfo).not.toHaveBeenCalled();
+    expect(repositories.xubioClientes.create).not.toHaveBeenCalled();
+    expect(result.xubioClienteResult.cliente?.clienteId).toBe(10270718);
+    expect(result.fiscalInfo.condicionImpositiva).toBe('CONSUMIDOR FINAL');
+    expect(result.canContinue).toBe(true);
+  });
+
+  it('resolves an existing Xubio cliente by CUIT when create reports already_exists', async () => {
+    const repositories = createRepositories();
+    repositories.xubioClientes.create.mockResolvedValue({
+      status: 'already_exists',
+      created: false,
+      alreadyExistsDetail:
+        'Ya existe el código TLQV-27187719572, este ha sido creado anteriormente como TLQV-27187719572',
+      rawPayload: {
+        description: 'Ya existe el código TLQV-27187719572',
+      },
+    });
+    repositories.xubioClientesFinder.findByName
+      .mockResolvedValueOnce({
+        clientes: [],
+        rawPayload: [],
+      })
+      .mockResolvedValueOnce({
+        clientes: [],
+        rawPayload: [],
+      })
+      .mockResolvedValueOnce({
+        clientes: [],
+        rawPayload: [],
+      })
+      .mockResolvedValueOnce({
+        clientes: [],
+        rawPayload: [],
+      })
+      .mockResolvedValueOnce({
+        clientes: [],
+        rawPayload: [],
+      })
+      .mockResolvedValueOnce({
+        clientes: [],
+        rawPayload: [],
+      })
+      .mockResolvedValue({
+        clientes: [
+          {
+            clienteId: 10256469,
+            nombre: 'Tania Silvia Coronel Alferrano',
+            razonSocial: 'ARTURO GUTIERREZ',
+            usrCode: 'TLQV-27187719572',
+            cuit: '27-18771957-2',
+            rawPayload: {},
+          },
+        ],
+        rawPayload: [],
+      });
+    const interactor = createInteractor(repositories);
+
+    const result = await interactor.execute({ tlqvCode: 'TLQV-14921' });
+
+    expect(result.status).toBe('already_exists');
+    if (result.status !== 'already_exists') {
+      throw new Error('Expected already_exists response');
+    }
+    expect(repositories.xubioClientesFinder.findByName).toHaveBeenCalledWith({
       nombre: 'TLQV-27187719572',
     });
+    expect(repositories.xubioClientes.create).toHaveBeenCalled();
     expect(result.xubioClienteResult.cliente?.clienteId).toBe(10256469);
     expect(result.canContinue).toBe(true);
   });

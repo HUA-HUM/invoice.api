@@ -188,6 +188,37 @@ describe('GetTusFacturasAfipInfoRepository', () => {
     );
   });
 
+  it('returns invalid_document without calling TusFacturas when documentoNro does not have 11 digits', async () => {
+    const post = jest.fn();
+    const repository = new GetTusFacturasAfipInfoRepository({
+      userToken: 'user-token',
+      apiKey: 'api-key',
+      apiToken: 'api-token',
+      httpClient: { post } as unknown as AxiosInstance,
+    });
+
+    const result = await repository.getAfipInfo({
+      documentoNro: '44.482.399',
+      documentoTipo: 'CUIT',
+    });
+
+    expect(post).not.toHaveBeenCalled();
+    expect(result.status).toBe('invalid_document');
+    expect(result.found).toBe(false);
+    if (result.status !== 'invalid_document') {
+      throw new Error('Expected invalid_document response');
+    }
+    expect(result.invalidDocument.documentoNro).toBe('44.482.399');
+    expect(result.invalidDocument.documentoNroDigits).toBe('44482399');
+    expect(result.invalidDocument.documentoTipo).toBe('CUIT');
+    expect(result.invalidDocument.rawPayload).toEqual({
+      error: 'INVALID_DOCUMENT_LENGTH',
+      documentoNro: '44.482.399',
+      documentoNroDigits: '44482399',
+      expectedDigits: 11,
+    });
+  });
+
   it('rejects a response whose schema is invalid', async () => {
     const post = jest.fn().mockResolvedValue({ data: { ok: true } });
     const repository = new GetTusFacturasAfipInfoRepository({

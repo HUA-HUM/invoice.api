@@ -89,12 +89,19 @@ export class GetTusFacturasAfipInfoRepository implements IGetTusFacturasAfipInfo
   async getAfipInfo(
     command: GetTusFacturasAfipInfoCommand,
   ): Promise<GetTusFacturasAfipInfoResponse> {
-    const documentoNroDigits = normalizeDocumentoNroDigits(
-      command.documentoNro,
-    );
+    const documentoNroDigits = extractDocumentoNroDigits(command.documentoNro);
     const documentoTipo =
       command.documentoTipo ??
       inferDocumentoTipoFromDocumentoNroDigits(documentoNroDigits);
+
+    if (documentoNroDigits.length !== DOCUMENTO_DIGITS_LENGTH) {
+      return buildInvalidDocumentoLengthResponse(
+        command.documentoNro,
+        documentoNroDigits,
+        documentoTipo,
+      );
+    }
+
     const documentoNro = formatDocumentoNro(documentoNroDigits);
 
     try {
@@ -317,15 +324,40 @@ function serializeResponseBody(value: unknown): string {
   }
 }
 
-function normalizeDocumentoNroDigits(value: string): string {
-  const digits = value.replace(/\D/g, '');
-  if (digits.length !== DOCUMENTO_DIGITS_LENGTH) {
-    throw new RangeError(
-      `documentoNro must contain exactly ${DOCUMENTO_DIGITS_LENGTH} digits`,
-    );
-  }
+function extractDocumentoNroDigits(value: string): string {
+  return value.replace(/\D/g, '');
+}
 
-  return digits;
+function buildInvalidDocumentoLengthResponse(
+  documentoNro: string,
+  documentoNroDigits: string,
+  documentoTipo: TusFacturasDocumentoTipo,
+): GetTusFacturasAfipInfoResponse {
+  const normalizedDocumentoNro = documentoNro.trim();
+  const displayDocumentoNro =
+    normalizedDocumentoNro === '' ? documentoNroDigits : normalizedDocumentoNro;
+  const message = `documentoNro must contain exactly ${DOCUMENTO_DIGITS_LENGTH} digits`;
+
+  return {
+    status: 'invalid_document',
+    found: false,
+    invalidDocument: {
+      documentoNro: displayDocumentoNro,
+      documentoNroDigits,
+      documentoTipo,
+      message,
+      messages: [
+        message,
+        `No se puede consultar TusFacturas con un documento que no tiene ${DOCUMENTO_DIGITS_LENGTH} dígitos.`,
+      ],
+      rawPayload: {
+        error: 'INVALID_DOCUMENT_LENGTH',
+        documentoNro: displayDocumentoNro,
+        documentoNroDigits,
+        expectedDigits: DOCUMENTO_DIGITS_LENGTH,
+      },
+    },
+  };
 }
 
 function formatDocumentoNro(digits: string): string {

@@ -126,6 +126,43 @@ export class CreateXubioClienteFromTlqvInteractor {
     const buyerData = orderDetails.buyerData;
     const cuitCompradorDigits = buyerData.cuitCompradorDigits;
 
+    if (this.findXubioClienteRepository !== undefined) {
+      let existingCliente: XubioCliente | undefined;
+      try {
+        existingCliente = await this.findExistingXubioCliente({
+          cuitDigits: cuitCompradorDigits,
+          buyerName: buyerData.nombreDestinatario,
+          allowNameOnlyMatch: !hasValidFiscalDocumento(cuitCompradorDigits),
+        });
+      } catch (error: unknown) {
+        return {
+          status: 'blocked',
+          canContinue: false,
+          tlqvCode: prepare.tlqvCode,
+          prepare,
+          orderDetails,
+          buyerData,
+          blockers: [
+            {
+              code: 'XUBIO_EXISTING_CLIENT_LOOKUP_FAILED',
+              message: `No se pudo validar si el cliente ya existe en Xubio. ${readErrorMessage(error)}`,
+            },
+          ],
+        };
+      }
+
+      if (existingCliente !== undefined) {
+        return buildExistingClienteResponse({
+          tlqvCode: prepare.tlqvCode,
+          prepare,
+          orderDetails,
+          buyerData,
+          existingCliente,
+          fallbackDocumentoDigits: cuitCompradorDigits,
+        });
+      }
+    }
+
     if (cuitCompradorDigits === undefined || cuitCompradorDigits === null) {
       return {
         status: 'blocked',
@@ -258,6 +295,7 @@ export class CreateXubioClienteFromTlqvInteractor {
           cuitDigits: cuitCompradorDigits,
           buyerName: buyerData.nombreDestinatario,
           razonSocial: fiscalInfo.razonSocial as string,
+          allowNameOnlyMatch: true,
         });
       } catch (error: unknown) {
         return {
@@ -332,9 +370,10 @@ export class CreateXubioClienteFromTlqvInteractor {
   }
 
   private async findExistingXubioCliente(command: {
-    cuitDigits: string;
+    cuitDigits?: string | null;
     buyerName?: string | null;
     razonSocial?: string | null;
+    allowNameOnlyMatch?: boolean;
   }): Promise<XubioCliente | undefined> {
     if (this.findXubioClienteRepository === undefined) {
       return undefined;
@@ -351,7 +390,7 @@ export class CreateXubioClienteFromTlqvInteractor {
         nombre,
       });
       const match = response.clientes.find((cliente) =>
-        matchesExistingCliente(cliente, command.cuitDigits),
+        matchesExistingCliente(cliente, command),
       );
 
       if (match !== undefined) {
@@ -361,6 +400,102 @@ export class CreateXubioClienteFromTlqvInteractor {
 
     return undefined;
   }
+}
+
+function buildExistingClienteResponse(command: {
+  tlqvCode: string;
+  prepare: PrepareTlqvInvoiceResponse;
+  orderDetails: TlqvOrderDetails;
+  buyerData: TlqvOrderBuyerData;
+  existingCliente: XubioCliente;
+  fallbackDocumentoDigits?: string | null;
+}): CreateXubioClienteFromTlqvResponse {
+  const fiscalInfo = buildFiscalInfoFromExistingCliente(
+    command.existingCliente,
+    command.fallbackDocumentoDigits,
+  );
+
+  return {
+    status: 'already_exists',
+    canContinue: true,
+    tlqvCode: command.tlqvCode,
+    prepare: command.prepare,
+    orderDetails: command.orderDetails,
+    buyerData: command.buyerData,
+    fiscalInfo,
+    documentoTipo: fiscalInfo.documentoTipo,
+    xubioClienteResult: {
+      status: 'already_exists',
+      created: false,
+      cliente: command.existingCliente,
+      rawPayload: command.existingCliente.rawPayload,
+    },
+  };
+}
+
+function buildFiscalInfoFromExistingCliente(
+  cliente: XubioCliente,
+  fallbackDocumentoDigits?: string | null,
+): TusFacturasAfipInfo {
+  const rawDocumento =
+    normalizeOptionalString(cliente.cuit) ??
+    normalizeOptionalString(cliente.dni) ??
+    normalizeOptionalString(fallbackDocumentoDigits) ??
+    '';
+  const documentoNroDigits = normalizeDocumentDigits(rawDocumento);
+  const documentoTipo = inferDocumentoTipoFromOptionalDigits(documentoNroDigits);
+
+  return {
+    documentoNro: rawDocumento,
+    documentoNroDigits,
+    documentoTipo,
+    razonSocial: cliente.razonSocial ?? cliente.nombre,
+    condicionImpositiva: resolveCondicionImpositivaFromXubioCliente(cliente),
+    direccion: cliente.direccion,
+    codigoPostal: cliente.codigoPostal,
+    provincia: cliente.provincia?.nombre ?? null,
+    rawPayload: cliente.rawPayload,
+  };
+}
+
+function resolveCondicionImpositivaFromXubioCliente(
+  cliente: XubioCliente,
+): string {
+  const categoriaFiscalCodigo = normalizeForComparison(
+    cliente.categoriaFiscal?.codigo,
+  );
+
+  if (categoriaFiscalCodigo === 'RI') {
+    return 'RESPONSABLE INSCRIPTO';
+  }
+
+  if (categoriaFiscalCodigo === 'MT') {
+    return 'MONOTRIBUTO';
+  }
+
+  if (categoriaFiscalCodigo === 'CF') {
+    return 'CONSUMIDOR FINAL';
+  }
+
+  if (categoriaFiscalCodigo === 'EX') {
+    return 'EXENTO';
+  }
+
+  const categoriaFiscalNombre = normalizeOptionalString(
+    cliente.categoriaFiscal?.nombre,
+  );
+  if (categoriaFiscalNombre !== null) {
+    return categoriaFiscalNombre;
+  }
+
+  const identificacionTributariaCodigo = normalizeForComparison(
+    cliente.identificacionTributaria?.codigo,
+  );
+  if (identificacionTributariaCodigo === 'DNI') {
+    return 'CONSUMIDOR FINAL';
+  }
+
+  return 'CONSUMIDOR FINAL';
 }
 
 function buildFiscalInfoBlockers(
@@ -392,19 +527,19 @@ function inferDocumentoTipo(digits: string): TusFacturasDocumentoTipo {
 }
 
 function buildClienteSearchCandidates(command: {
-  cuitDigits: string;
+  cuitDigits?: string | null;
   buyerName?: string | null;
   razonSocial?: string | null;
 }): string[] {
+  const cuitDigits = normalizeOptionalString(command.cuitDigits);
+  const cuitCandidates =
+    cuitDigits === null
+      ? []
+      : [`TLQV-${cuitDigits}`, formatCuitIfPossible(cuitDigits), cuitDigits];
+
   return Array.from(
     new Set(
-      [
-        `TLQV-${command.cuitDigits}`,
-        command.buyerName,
-        command.razonSocial,
-        formatCuit(command.cuitDigits),
-        command.cuitDigits,
-      ]
+      [command.buyerName, command.razonSocial, ...cuitCandidates]
         .map((value) => normalizeOptionalString(value))
         .filter((value): value is string => value !== null),
     ),
@@ -413,14 +548,43 @@ function buildClienteSearchCandidates(command: {
 
 function matchesExistingCliente(
   cliente: XubioCliente,
-  cuitDigits: string,
+  command: {
+    cuitDigits?: string | null;
+    buyerName?: string | null;
+    razonSocial?: string | null;
+    allowNameOnlyMatch?: boolean;
+  },
 ): boolean {
-  const expectedUsrCode = normalizeForComparison(`TLQV-${cuitDigits}`);
+  const cuitDigits = normalizeOptionalString(command.cuitDigits);
+
+  if (cuitDigits !== null) {
+    const expectedUsrCode = normalizeForComparison(`TLQV-${cuitDigits}`);
+    if (normalizeForComparison(cliente.usrCode) === expectedUsrCode) {
+      return true;
+    }
+
+    if (
+      normalizeDocumentDigits(cliente.cuit) === cuitDigits ||
+      normalizeDocumentDigits(cliente.dni) === cuitDigits
+    ) {
+      return true;
+    }
+  }
+
+  if (command.allowNameOnlyMatch !== true) {
+    return false;
+  }
+
+  const buyerName = normalizeForComparison(command.buyerName);
+  const razonSocial = normalizeForComparison(command.razonSocial);
+  const clienteNombre = normalizeForComparison(cliente.nombre);
+  const clienteRazonSocial = normalizeForComparison(cliente.razonSocial);
 
   return (
-    normalizeForComparison(cliente.usrCode) === expectedUsrCode ||
-    normalizeDocumentDigits(cliente.cuit) === cuitDigits ||
-    normalizeDocumentDigits(cliente.dni) === cuitDigits
+    (buyerName !== '' &&
+      (clienteNombre === buyerName || clienteRazonSocial === buyerName)) ||
+    (razonSocial !== '' &&
+      (clienteNombre === razonSocial || clienteRazonSocial === razonSocial))
   );
 }
 
@@ -428,8 +592,22 @@ function normalizeDocumentDigits(value: string | null | undefined): string {
   return value?.replace(/\D/g, '') ?? '';
 }
 
-function formatCuit(digits: string): string {
+function formatCuitIfPossible(digits: string): string {
+  if (digits.length !== 11) {
+    return digits;
+  }
+
   return `${digits.slice(0, 2)}-${digits.slice(2, 10)}-${digits.slice(10)}`;
+}
+
+function hasValidFiscalDocumento(value: string | null | undefined): boolean {
+  return normalizeOptionalString(value)?.replace(/\D/g, '').length === 11;
+}
+
+function inferDocumentoTipoFromOptionalDigits(
+  digits: string,
+): TusFacturasDocumentoTipo {
+  return digits.length === 11 ? inferDocumentoTipo(digits) : 'CUIT';
 }
 
 function normalizeForComparison(value: string | null | undefined): string {
