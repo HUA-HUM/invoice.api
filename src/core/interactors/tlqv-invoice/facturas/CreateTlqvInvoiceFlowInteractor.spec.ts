@@ -190,6 +190,48 @@ describe('CreateTlqvInvoiceFlowInteractor', () => {
     expect(result.createdInvoice?.invoice.transaccionId).toBe(75226596);
   });
 
+  it('blocks with a clear date sequence error when Xubio rejects invoice creation by chronological numbering', async () => {
+    const dependencies = createDependencies();
+    dependencies.createInvoice.create.mockRejectedValue(
+      new Error(
+        'Xubio request failed while creating invoice TLQV-15783 ML: 2000017391220904: HTTP 401 - {"description":"El documento número A-00008-00002243 tiene fecha mayor a la fecha del documento que desea emitir"}',
+      ),
+    );
+    const interactor = createInteractor(dependencies);
+
+    const result = await interactor.execute({
+      tlqvCode: 'TLQV-1569',
+      stopAfter: 'invoice_creation',
+      dryRun: false,
+      issueDate: '2026-07-25',
+    });
+
+    expect(result.status).toBe('blocked');
+    expect(result.canContinue).toBe(false);
+    if (result.status !== 'blocked') {
+      throw new Error('Expected blocked response');
+    }
+    expect(result.blockers).toEqual([
+      expect.objectContaining({
+        code: 'XUBIO_INVOICE_DATE_SEQUENCE_ERROR',
+        step: 'invoice_creation',
+      }),
+    ]);
+    expect(result.steps).toEqual([
+      expect.objectContaining({ name: 'client', status: 'completed' }),
+      expect.objectContaining({ name: 'source_data', status: 'completed' }),
+      expect.objectContaining({
+        name: 'invoice_creation',
+        status: 'blocked',
+        blockers: [
+          expect.objectContaining({
+            code: 'XUBIO_INVOICE_DATE_SEQUENCE_ERROR',
+          }),
+        ],
+      }),
+    ]);
+  });
+
   it('uses today as issue date when no custom issue date is sent', async () => {
     const dependencies = createDependencies();
     const interactor = createInteractor(dependencies);

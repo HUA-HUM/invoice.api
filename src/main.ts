@@ -6,6 +6,7 @@ import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app/modules/app.module';
 import { StockBueTlqvCacheRefreshQueueService } from './app/services/stock-bue-tlqv-cache-refresh-queue.service';
+import { TlqvInvoiceFacturasBulkQueueService } from './app/services/tlqv-invoice-facturas-bulk-queue.service';
 import { XubioComprobantesBackfillQueueService } from './app/services/xubio-comprobantes-backfill-queue.service';
 
 async function bootstrap() {
@@ -77,12 +78,16 @@ async function bootstrap() {
     const stockBueTlqvCacheRefreshQueueService = app.get(
       StockBueTlqvCacheRefreshQueueService,
     );
+    const tlqvInvoiceFacturasBulkQueueService = app.get(
+      TlqvInvoiceFacturasBulkQueueService,
+    );
 
     serverAdapter.setBasePath(basePath);
     createBullBoard({
       queues: [
         new BullMQAdapter(backfillQueueService.getQueue()),
         new BullMQAdapter(stockBueTlqvCacheRefreshQueueService.getQueue()),
+        new BullMQAdapter(tlqvInvoiceFacturasBulkQueueService.getQueue()),
       ],
       serverAdapter,
     });

@@ -370,9 +370,33 @@ export class CreateTlqvInvoiceFlowInteractor {
       };
     }
 
-    const createdInvoice = await this.createXubioInvoiceRepository.create({
-      invoice: invoiceBuild.invoice,
-    });
+    let createdInvoice: CreateXubioInvoiceResponse;
+    try {
+      createdInvoice = await this.createXubioInvoiceRepository.create({
+        invoice: invoiceBuild.invoice,
+      });
+    } catch (error: unknown) {
+      const blocker = buildXubioInvoiceCreationBlocker(error);
+      steps.push({
+        name: 'invoice_creation',
+        status: 'blocked',
+        blockers: [blocker],
+      });
+
+      return {
+        status: 'blocked',
+        canContinue: false,
+        tlqvCode,
+        stopAfter,
+        dryRun,
+        steps,
+        clienteFlow,
+        xubioClienteId,
+        sourceData: sourceDataResult.sourceData,
+        invoiceBuild,
+        blockers: [blocker],
+      };
+    }
 
     steps.push({
       name: 'invoice_creation',
@@ -507,6 +531,30 @@ function buildClienteFlowBlockers(
   ];
 }
 
+function buildXubioInvoiceCreationBlocker(
+  error: unknown,
+): TlqvInvoiceFlowBlocker {
+  const message = getErrorMessage(error);
+  const normalizedMessage = normalizeForComparison(message);
+
+  if (
+    normalizedMessage.includes('FECHA MAYOR A LA FECHA DEL DOCUMENTO') ||
+    normalizedMessage.includes('FECHA DEL DOCUMENTO QUE DESEA EMITIR')
+  ) {
+    return {
+      code: 'XUBIO_INVOICE_DATE_SEQUENCE_ERROR',
+      message: `Xubio no permite emitir este comprobante con esa fecha porque ya existe un comprobante posterior en la misma numeración. ${message}`,
+      step: 'invoice_creation',
+    };
+  }
+
+  return {
+    code: 'XUBIO_INVOICE_CREATION_FAILED',
+    message: `Xubio rechazó la creación de la factura. ${message}`,
+    step: 'invoice_creation',
+  };
+}
+
 function normalizeRequiredTlqvCode(value: string): string {
   const normalized = value.trim().toUpperCase();
   if (normalized === '') {
@@ -614,4 +662,14 @@ function getErrorMessage(error: unknown): string {
   }
 
   return 'unknown error';
+}
+
+function normalizeForComparison(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toUpperCase();
 }

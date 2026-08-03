@@ -21,7 +21,7 @@ export const STOCK_BUE_TLQV_CACHE_REFRESH_QUEUE_NAME =
   'stock-bue-tlqv-cache-refresh';
 const STOCK_BUE_TLQV_CACHE_REFRESH_JOB_NAME = 'refresh';
 const STOCK_BUE_TLQV_CACHE_REFRESH_REPEAT_JOB_ID = 'stock-bue-tlqv-cache-cron';
-const DEFAULT_REFRESH_CRON = '0 3,15 * * *';
+const DEFAULT_REFRESH_CRON = '0 * * * *';
 const DEFAULT_QUEUE_READY_TIMEOUT_MS = 10_000;
 
 interface StockBueTlqvCacheRefreshJobData {
@@ -123,6 +123,11 @@ export class StockBueTlqvCacheRefreshQueueService implements OnModuleDestroy {
     }
 
     await this.waitUntilQueueReady();
+    const pattern =
+      this.readOptionalConfig('STOCK_BUE_TLQV_CACHE_REFRESH_CRON') ??
+      DEFAULT_REFRESH_CRON;
+
+    await this.removeRegisteredCronJobs();
     await this.queue.add(
       STOCK_BUE_TLQV_CACHE_REFRESH_JOB_NAME,
       {
@@ -137,12 +142,37 @@ export class StockBueTlqvCacheRefreshQueueService implements OnModuleDestroy {
       {
         jobId: STOCK_BUE_TLQV_CACHE_REFRESH_REPEAT_JOB_ID,
         repeat: {
-          pattern:
-            this.readOptionalConfig('STOCK_BUE_TLQV_CACHE_REFRESH_CRON') ??
-            DEFAULT_REFRESH_CRON,
+          pattern,
         },
       },
     );
+
+    this.logger.log(
+      `Stock BUE TLQV cache refresh cron registered ${JSON.stringify({
+        pattern,
+        jobId: STOCK_BUE_TLQV_CACHE_REFRESH_REPEAT_JOB_ID,
+      })}`,
+    );
+  }
+
+  private async removeRegisteredCronJobs(): Promise<void> {
+    const repeatableJobs = await this.queue.getRepeatableJobs();
+    const jobsToRemove = repeatableJobs.filter(isStockBueTlqvCacheCronJob);
+
+    for (const job of jobsToRemove) {
+      await this.queue.removeRepeatableByKey(job.key);
+    }
+
+    if (jobsToRemove.length > 0) {
+      this.logger.log(
+        `Stock BUE TLQV cache refresh old cron registrations removed ${JSON.stringify(
+          {
+            totalRemoved: jobsToRemove.length,
+            jobId: STOCK_BUE_TLQV_CACHE_REFRESH_REPEAT_JOB_ID,
+          },
+        )}`,
+      );
+    }
   }
 
   private async processRefreshJob(
@@ -261,4 +291,16 @@ export class StockBueTlqvCacheRefreshQueueService implements OnModuleDestroy {
 
     return ['1', 'true', 'yes', 'y'].includes(rawValue.toLowerCase());
   }
+}
+
+function isStockBueTlqvCacheCronJob(job: {
+  id?: string | null;
+  key: string;
+  name: string;
+}): boolean {
+  return (
+    job.name === STOCK_BUE_TLQV_CACHE_REFRESH_JOB_NAME &&
+    (job.id === STOCK_BUE_TLQV_CACHE_REFRESH_REPEAT_JOB_ID ||
+      job.key.includes(STOCK_BUE_TLQV_CACHE_REFRESH_REPEAT_JOB_ID))
+  );
 }
