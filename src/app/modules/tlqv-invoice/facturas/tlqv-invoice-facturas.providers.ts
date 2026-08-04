@@ -50,6 +50,12 @@ export const tlqvInvoiceFacturasInteractorProviders: Provider[] = [
         new GetTlqvItemByCodeRepository(spreadsheetOptions),
         new GetMadreItemByTlqvCodeRepository(spreadsheetOptions),
         createXubioCreateInvoiceRepository(configService),
+        undefined,
+        undefined,
+        new GetTlqvItemByCodeRepository({
+          ...spreadsheetOptions,
+          spreadsheetName: 'prueba-lectura',
+        }),
       );
     },
   },

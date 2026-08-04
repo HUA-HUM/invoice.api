@@ -33,6 +33,7 @@ const DEFAULT_DESCRIPCION = 'Cliente creado automáticamente desde TLQV';
 const CONSUMIDOR_FINAL_CONDICION_IMPOSITIVA = 'CONSUMIDOR FINAL';
 const CONSUMIDOR_FINAL_CATEGORIA_FISCAL = 'CF';
 const DNI_IDENTIFICACION_TRIBUTARIA = 'DNI';
+const DNI_DERIVABLE_10_DIGIT_PREFIXES = new Set(['20', '23', '24', '27', '30']);
 
 export type CreateXubioClienteFromTlqvStatus =
   'created' | 'already_exists' | 'blocked' | 'invalid_fiscal_document';
@@ -844,6 +845,13 @@ function deriveDniDigitsFromDocumento(
 
   if (digits.length === 11) {
     return digits.slice(2, 10);
+  }
+
+  if (
+    digits.length === 10 &&
+    DNI_DERIVABLE_10_DIGIT_PREFIXES.has(digits.slice(0, 2))
+  ) {
+    return digits.slice(2);
   }
 
   return isDniLength(digits) ? digits : null;

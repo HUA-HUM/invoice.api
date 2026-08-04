@@ -1,9 +1,7 @@
 import type { IGetMadreItemByTlqvCodeRepository } from '../../../adapters/repositories/spreadsheet-api/madre/IGetMadreItemByTlqvCodeRepository';
 import type { IGetTlqvItemByCodeRepository } from '../../../adapters/repositories/spreadsheet-api/tlqv/IGetTlqvItemByCodeRepository';
 import type { TlqvItemData } from '../../../entities/spreadsheet-api/tlqv/TlqvItems';
-import type {
-  CreateXubioClienteFromTlqvResponse,
-} from '../clientes/CreateXubioClienteFromTlqvInteractor';
+import type { CreateXubioClienteFromTlqvResponse } from '../clientes/CreateXubioClienteFromTlqvInteractor';
 import {
   CreateTlqvInvoiceFlowInteractor,
   type ICreateXubioClienteFromTlqvUseCase,
@@ -141,6 +139,35 @@ describe('CreateTlqvInvoiceFlowInteractor', () => {
     ]);
     expect(result.sourceData?.tlqvSheet.found).toBe(true);
     expect(result.sourceData?.madreSheet.found).toBe(false);
+  });
+
+  it('uses fallback direct TLQV sheet lookup when the primary TLQV source does not find the item', async () => {
+    const dependencies = createDependencies();
+    dependencies.tlqvSheet.getByCode.mockResolvedValue({
+      found: false,
+      tlqvCode: 'TLQV-1569',
+      reason: 'not_found',
+    });
+    dependencies.fallbackTlqvSheet.getByCode.mockResolvedValue({
+      found: true,
+      tlqvCode: 'TLQV-1569',
+      item: {
+        rowNumber: 22,
+        data: createTlqvItemData(),
+      },
+    });
+    const interactor = createInteractor(dependencies);
+
+    const result = await interactor.execute({ tlqvCode: 'TLQV-1569' });
+
+    expect(result.status).toBe('completed');
+    expect(dependencies.tlqvSheet.getByCode).toHaveBeenCalledWith({
+      tlqvCode: 'TLQV-1569',
+    });
+    expect(dependencies.fallbackTlqvSheet.getByCode).toHaveBeenCalledWith({
+      tlqvCode: 'TLQV-1569',
+    });
+    expect(result.sourceData?.tlqvSheet.found).toBe(true);
   });
 
   it('skips invoice creation when dryRun is enabled', async () => {
@@ -299,6 +326,7 @@ describe('CreateTlqvInvoiceFlowInteractor', () => {
 interface TestDependencies {
   createCliente: jest.Mocked<ICreateXubioClienteFromTlqvUseCase>;
   tlqvSheet: jest.Mocked<IGetTlqvItemByCodeRepository>;
+  fallbackTlqvSheet: jest.Mocked<IGetTlqvItemByCodeRepository>;
   madreSheet: jest.Mocked<IGetMadreItemByTlqvCodeRepository>;
   createInvoice: jest.Mocked<ICreateXubioInvoiceRepository>;
 }
@@ -313,17 +341,20 @@ function createInteractor(
     dependencies.createInvoice,
     undefined,
     () => '2026-07-30',
+    dependencies.fallbackTlqvSheet,
   );
 }
 
-function createDependencies(options: {
-  clienteFlow?: CreateXubioClienteFromTlqvResponse;
-} = {}): TestDependencies {
+function createDependencies(
+  options: {
+    clienteFlow?: CreateXubioClienteFromTlqvResponse;
+  } = {},
+): TestDependencies {
   return {
     createCliente: {
-      execute: jest.fn().mockResolvedValue(
-        options.clienteFlow ?? createClienteFlowResponse(),
-      ),
+      execute: jest
+        .fn()
+        .mockResolvedValue(options.clienteFlow ?? createClienteFlowResponse()),
     },
     tlqvSheet: {
       getByCode: jest.fn().mockResolvedValue({
@@ -335,6 +366,13 @@ function createDependencies(options: {
         },
       }),
     },
+    fallbackTlqvSheet: {
+      getByCode: jest.fn().mockResolvedValue({
+        found: false,
+        tlqvCode: 'TLQV-1569',
+        reason: 'not_found',
+      }),
+    },
     madreSheet: {
       getByTlqvCode: jest.fn().mockResolvedValue({
         found: true,
@@ -343,8 +381,7 @@ function createDependencies(options: {
           rowNumber: 1526,
           data: {
             Identificador: 'TLQV-1569',
-            NOMBREPRODUCTO:
-              'Tabla De Remo Inflable con su kit de accesorios',
+            NOMBREPRODUCTO: 'Tabla De Remo Inflable con su kit de accesorios',
             NROVENTA: '2000007867251585',
             PRECIOVENTA: '$781,999.10',
             COMISIONML: '$121,209.90',

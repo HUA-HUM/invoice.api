@@ -27,14 +27,9 @@ export type TlqvInvoiceFlowStopAfter =
 export type TlqvInvoiceFlowStatus = 'completed' | 'blocked';
 
 export type TlqvInvoiceFlowStepName =
-  | 'client'
-  | 'source_data'
-  | 'invoice_creation';
+  'client' | 'source_data' | 'invoice_creation';
 
-export type TlqvInvoiceFlowStepStatus =
-  | 'completed'
-  | 'blocked'
-  | 'skipped';
+export type TlqvInvoiceFlowStepStatus = 'completed' | 'blocked' | 'skipped';
 
 export interface CreateTlqvInvoiceFlowCommand {
   tlqvCode: string;
@@ -108,6 +103,7 @@ export class CreateTlqvInvoiceFlowInteractor {
     private readonly buildXubioInvoiceFromTlqvInteractor = new BuildXubioInvoiceFromTlqvInteractor(),
     private readonly getTodayIsoDate: () => string = () =>
       new Date().toISOString().slice(0, 10),
+    private readonly fallbackTlqvSheetRepository?: IGetTlqvItemByCodeRepository,
   ) {}
 
   async execute(
@@ -322,8 +318,7 @@ export class CreateTlqvInvoiceFlowInteractor {
       steps.push({
         name: 'invoice_creation',
         status: 'skipped',
-        message:
-          'dryRun=true: se armó el payload, pero no se emite factura.',
+        message: 'dryRun=true: se armó el payload, pero no se emite factura.',
       });
 
       return {
@@ -419,9 +414,7 @@ export class CreateTlqvInvoiceFlowInteractor {
     };
   }
 
-  private async getSourceData(
-    tlqvCode: string,
-  ): Promise<
+  private async getSourceData(tlqvCode: string): Promise<
     | {
         status: 'completed';
         sourceData: TlqvInvoiceFlowSourceData;
@@ -438,7 +431,7 @@ export class CreateTlqvInvoiceFlowInteractor {
 
     try {
       const [tlqvSheet, madreSheet] = await Promise.all([
-        this.tlqvSheetRepository.getByCode({ tlqvCode }),
+        this.getTlqvSheetWithFallback(tlqvCode),
         this.madreSheetRepository.getByTlqvCode({ tlqvCode }),
       ]);
       sourceData = { tlqvSheet, madreSheet };
@@ -498,6 +491,26 @@ export class CreateTlqvInvoiceFlowInteractor {
         message: 'Datos obtenidos desde solapas TLQV y MADRE.',
       },
     };
+  }
+
+  private async getTlqvSheetWithFallback(
+    tlqvCode: string,
+  ): Promise<GetTlqvItemByCodeResponse> {
+    const tlqvSheet = await this.tlqvSheetRepository.getByCode({ tlqvCode });
+
+    if (
+      tlqvSheet.found ||
+      this.fallbackTlqvSheetRepository === undefined ||
+      this.fallbackTlqvSheetRepository === this.tlqvSheetRepository
+    ) {
+      return tlqvSheet;
+    }
+
+    const fallbackTlqvSheet = await this.fallbackTlqvSheetRepository.getByCode({
+      tlqvCode,
+    });
+
+    return fallbackTlqvSheet.found ? fallbackTlqvSheet : tlqvSheet;
   }
 }
 

@@ -105,6 +105,43 @@ describe('CreateXubioConsumidorFinalClienteFromIssueInteractor', () => {
     });
   });
 
+  it('derives DNI from a 10 digit document with person prefix', async () => {
+    const repositories = createRepositories({
+      issues: [
+        {
+          ...createInvalidFiscalDocumentIssue(),
+          cuit: '2722395581',
+          documentoNro: '2722395581',
+          documentoNroDigits: '2722395581',
+        },
+      ],
+    });
+    repositories.xubioClientes.create.mockResolvedValue({
+      status: 'created',
+      created: true,
+      rawPayload: {},
+    });
+    const interactor = createInteractor(repositories);
+
+    const result = await interactor.execute({ tlqvCode: 'TLQV-7734' });
+
+    expect(result.status).toBe('created');
+    if (result.status !== 'created') {
+      throw new Error('Expected created response');
+    }
+    expect(result.dni).toBe('22395581');
+    expect(result.usrCode).toBe('TLQV-2722395581');
+    expect(repositories.xubioClientes.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cliente: expect.objectContaining({
+          cuit: '22.395.581',
+          CUIT: '22.395.581',
+          usrCode: 'TLQV-2722395581',
+        }),
+      }),
+    );
+  });
+
   it('blocks when there is no invalid fiscal document issue', async () => {
     const repositories = createRepositories({
       issues: [],

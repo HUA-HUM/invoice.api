@@ -399,6 +399,54 @@ describe('CreateXubioClienteFromTlqvInteractor', () => {
     expect(repositories.issues.upsert).not.toHaveBeenCalled();
   });
 
+  it('creates a consumidor final Xubio cliente when TusFacturas rejects a 10 digit document with person prefix', async () => {
+    const repositories = createRepositories();
+    repositories.opsOrderDetails.getByTlqvCode.mockResolvedValue({
+      found: true,
+      orderDetails: createOrderDetails({
+        cuitComprador: '2722395581',
+        cuitCompradorDigits: '2722395581',
+      }),
+    });
+    repositories.tusFacturas.getAfipInfo.mockResolvedValue({
+      status: 'invalid_document',
+      found: false,
+      invalidDocument: {
+        documentoNro: '2722395581',
+        documentoNroDigits: '2722395581',
+        documentoTipo: 'CUIT',
+        message: 'No pudimos obtener datos para el CUIT ingresado.',
+        messages: ['No pudimos obtener datos para el CUIT ingresado.'],
+        rawPayload: { error: 'S' },
+      },
+    });
+    const interactor = createInteractor(repositories);
+
+    const result = await interactor.execute({ tlqvCode: 'TLQV-14921' });
+
+    expect(result.status).toBe('created');
+    if (result.status !== 'created') {
+      throw new Error('Expected created response');
+    }
+    expect(result.fiscalInfo.documentoNroDigits).toBe('22395581');
+    expect(repositories.xubioClientes.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cliente: expect.objectContaining({
+          identificacionTributaria: {
+            codigo: 'DNI',
+          },
+          categoriaFiscal: {
+            codigo: 'CF',
+          },
+          cuit: '22.395.581',
+          CUIT: '22.395.581',
+          usrCode: 'TLQV-2722395581',
+        }),
+      }),
+    );
+    expect(repositories.issues.upsert).not.toHaveBeenCalled();
+  });
+
   it('creates a consumidor final Xubio cliente when TusFacturas does not return fiscal condition', async () => {
     const repositories = createRepositories();
     repositories.tusFacturas.getAfipInfo.mockResolvedValue({
