@@ -334,7 +334,7 @@ describe('CreateXubioClienteFromTlqvInteractor', () => {
     expect(repositories.tusFacturas.getAfipInfo).not.toHaveBeenCalled();
   });
 
-  it('returns invalid_fiscal_document and records issue when TusFacturas rejects CUIT', async () => {
+  it('creates a consumidor final Xubio cliente when TusFacturas rejects a derivable CUIT', async () => {
     const repositories = createRepositories();
     repositories.tusFacturas.getAfipInfo.mockResolvedValue({
       status: 'invalid_document',
@@ -352,49 +352,139 @@ describe('CreateXubioClienteFromTlqvInteractor', () => {
 
     const result = await interactor.execute({ tlqvCode: 'TLQV-14921' });
 
-    expect(result.status).toBe('invalid_fiscal_document');
-    expect(repositories.issues.upsert).toHaveBeenCalledWith({
-      tlqvCode: 'TLQV-14921',
-      reason: 'INVALID_FISCAL_DOCUMENT',
-      source: 'tus_facturas',
-      saleNumber: '200001111',
-      buyerName: 'Tania Silvia Coronel Alferrano',
-      email: 'taniasilvia.coronel@gmail.com',
-      cuit: '27-18771957-2',
+    expect(result.status).toBe('created');
+    if (result.status !== 'created') {
+      throw new Error('Expected created response');
+    }
+    expect(result.canContinue).toBe(true);
+    expect(result.fiscalInfo).toEqual({
+      documentoNro: '18.771.957',
+      documentoNroDigits: '18771957',
       documentoTipo: 'CUIT',
-      message: 'No pudimos obtener datos para el CUIT ingresado.',
-      messages: ['No pudimos obtener datos para el CUIT ingresado.'],
+      razonSocial: 'Tania Silvia Coronel Alferrano',
+      condicionImpositiva: 'CONSUMIDOR FINAL',
+      direccion: 'Belgrano 53',
+      codigoPostal: '5000',
+      provincia: 'CORDOBA',
       rawPayload: { error: 'S' },
-      metadata: {
-        source: 'create_xubio_cliente_from_tlqv',
-        orderDetailsSource: 'ops_api',
-        orderDetails: {
-          tlqvCode: 'TLQV-14921',
-          saleNumber: '200001111',
-          source: 'ops_api',
-        },
-        stockBue: {
-          rowNumber: 10,
-          instruction: 'DESPACHADA',
-          description: 'Producto test',
-          fechaRecepcion: undefined,
-          fechaSalida: undefined,
-          fechaLimite: undefined,
-          fechaInstruccion: undefined,
-        },
-        buyerData: {
-          nombreDestinatario: 'Tania Silvia Coronel Alferrano',
-          direccion: 'Belgrano 53',
-          ciudad: 'CORDOBA',
-          provincia: 'CORDOBA',
-          codigoPostal: '5000',
-          telefono: '(351) 15 651-3528',
-          email: 'taniasilvia.coronel@gmail.com',
-        },
-        flokzuBuyerData: undefined,
-      },
-      now: new Date('2026-07-07T12:00:00.000Z'),
     });
+    expect(repositories.xubioClientes.create).toHaveBeenCalledWith({
+      cliente: {
+        nombre: 'Tania Silvia Coronel Alferrano',
+        razonSocial: 'Tania Silvia Coronel Alferrano',
+        primerNombre: 'Tania',
+        primerApellido: 'Silvia Coronel Alferrano',
+        identificacionTributaria: {
+          codigo: 'DNI',
+        },
+        categoriaFiscal: {
+          codigo: 'CF',
+        },
+        pais: {
+          codigo: 'ARGENTINA',
+        },
+        cuit: '18.771.957',
+        CUIT: '18.771.957',
+        direccion: 'Belgrano 53',
+        codigoPostal: '5000',
+        provincia: {
+          nombre: 'CORDOBA',
+        },
+        usrCode: 'TLQV-27187719572',
+        descripcion: 'Cliente creado automáticamente desde TLQV',
+        esclienteextranjero: 0,
+        esProveedor: 0,
+      },
+    });
+    expect(repositories.issues.upsert).not.toHaveBeenCalled();
+  });
+
+  it('creates a consumidor final Xubio cliente when TusFacturas does not return fiscal condition', async () => {
+    const repositories = createRepositories();
+    repositories.tusFacturas.getAfipInfo.mockResolvedValue({
+      status: 'found',
+      found: true,
+      afipInfo: {
+        documentoNro: '27-18771957-2',
+        documentoNroDigits: '27187719572',
+        documentoTipo: 'CUIT',
+        razonSocial: 'Tania Silvia Coronel Alferrano',
+        condicionImpositiva: null,
+        direccion: 'Belgrano 53',
+        codigoPostal: '5000',
+        provincia: 'CORDOBA',
+        rawPayload: { condicion_impositiva: '' },
+      },
+    });
+    const interactor = createInteractor(repositories);
+
+    const result = await interactor.execute({ tlqvCode: 'TLQV-14921' });
+
+    expect(result.status).toBe('created');
+    if (result.status !== 'created') {
+      throw new Error('Expected created response');
+    }
+    expect(result.canContinue).toBe(true);
+    expect(result.fiscalInfo.condicionImpositiva).toBe('CONSUMIDOR FINAL');
+    expect(result.fiscalInfo.documentoNroDigits).toBe('18771957');
+    expect(repositories.xubioClientes.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cliente: expect.objectContaining({
+          identificacionTributaria: {
+            codigo: 'DNI',
+          },
+          categoriaFiscal: {
+            codigo: 'CF',
+          },
+          cuit: '18.771.957',
+          CUIT: '18.771.957',
+        }),
+      }),
+    );
+    expect(repositories.issues.upsert).not.toHaveBeenCalled();
+  });
+
+  it('returns invalid_fiscal_document and records issue when TusFacturas rejects a non-derivable document', async () => {
+    const repositories = createRepositories();
+    repositories.opsOrderDetails.getByTlqvCode.mockResolvedValue({
+      found: true,
+      orderDetails: createOrderDetails({
+        cuitComprador: '1',
+        cuitCompradorDigits: '1',
+      }),
+    });
+    repositories.tusFacturas.getAfipInfo.mockResolvedValue({
+      status: 'invalid_document',
+      found: false,
+      invalidDocument: {
+        documentoNro: '1',
+        documentoNroDigits: '1',
+        documentoTipo: 'CUIT',
+        message: 'No pudimos obtener datos para el CUIT ingresado.',
+        messages: ['No pudimos obtener datos para el CUIT ingresado.'],
+        rawPayload: { error: 'S' },
+      },
+    });
+    const interactor = createInteractor(repositories);
+
+    const result = await interactor.execute({ tlqvCode: 'TLQV-14921' });
+
+    expect(result.status).toBe('invalid_fiscal_document');
+    expect(repositories.issues.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tlqvCode: 'TLQV-14921',
+        reason: 'INVALID_FISCAL_DOCUMENT',
+        source: 'tus_facturas',
+        cuit: '1',
+        documentoTipo: 'CUIT',
+        documentoNro: '1',
+        documentoNroDigits: '1',
+        message: 'No pudimos obtener datos para el CUIT ingresado.',
+        messages: ['No pudimos obtener datos para el CUIT ingresado.'],
+        rawPayload: { error: 'S' },
+        now: new Date('2026-07-07T12:00:00.000Z'),
+      }),
+    );
     expect(repositories.xubioClientes.create).not.toHaveBeenCalled();
   });
 

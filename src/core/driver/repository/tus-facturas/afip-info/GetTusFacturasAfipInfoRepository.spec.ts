@@ -156,9 +156,7 @@ describe('GetTusFacturasAfipInfoRepository', () => {
       throw new Error('Expected found response');
     }
     expect(result.afipInfo.razonSocial).toBe('LUIS PAULO FERRARI');
-    expect(result.afipInfo.condicionImpositiva).toBe(
-      'RESPONSABLE INSCRIPTO',
-    );
+    expect(result.afipInfo.condicionImpositiva).toBe('RESPONSABLE INSCRIPTO');
   });
 
   it('returns invalid_document when TusFacturas cannot recover AFIP data', async () => {
@@ -186,6 +184,47 @@ describe('GetTusFacturasAfipInfoRepository', () => {
     expect(result.invalidDocument.messages).toContain(
       'No pudimos obtener datos para el CUIT ingresado. Esto podria deberse a un error en el numero o a una caida temporal de los servicios de ARCA. Error EIP14',
     );
+  });
+
+  it('uses fiscal info when TusFacturas returns error S but includes usable AFIP data', async () => {
+    const post = jest.fn().mockResolvedValue({
+      data: {
+        error: 'S',
+        errores: [
+          'No se ha podido recuperar la condicion frente al IVA de este CUIT',
+        ],
+        razon_social: 'MARIA LAURA SOLDANO',
+        condicion_impositiva: 'CONSUMIDOR FINAL',
+        direccion: 'LOTE 300 0',
+        localidad: 'RIO CUARTO',
+        codigopostal: 'CP: 5800',
+        provincia: 'CORDOBA',
+        estado: 'ACTIVO',
+        apoc_existe: 'NO',
+        apoc_info: '',
+      },
+    });
+    const repository = new GetTusFacturasAfipInfoRepository({
+      userToken: 'user-token',
+      apiKey: 'api-key',
+      apiToken: 'api-token',
+      httpClient: { post } as unknown as AxiosInstance,
+    });
+
+    const result = await repository.getAfipInfo({
+      documentoNro: '27-28271993-8',
+    });
+
+    expect(result.status).toBe('found');
+    expect(result.found).toBe(true);
+    if (result.status !== 'found') {
+      throw new Error('Expected found response');
+    }
+    expect(result.afipInfo.documentoNro).toBe('27-28271993-8');
+    expect(result.afipInfo.documentoNroDigits).toBe('27282719938');
+    expect(result.afipInfo.razonSocial).toBe('MARIA LAURA SOLDANO');
+    expect(result.afipInfo.condicionImpositiva).toBe('CONSUMIDOR FINAL');
+    expect(result.afipInfo.estado).toBe('ACTIVO');
   });
 
   it('returns invalid_document without calling TusFacturas when documentoNro does not have 11 digits', async () => {

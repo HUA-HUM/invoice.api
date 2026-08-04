@@ -18,6 +18,7 @@ import type {
 import type {
   CreateXubioClienteResponse,
   XubioCliente,
+  XubioClientePayload,
 } from '../../../entities/xubio/clientes/XubioCliente';
 import { CreateXubioClienteInteractor } from '../../xubio/clientes/CreateXubioClienteInteractor';
 import { GetTusFacturasAfipInfoInteractor } from '../../tus-facturas/GetTusFacturasAfipInfoInteractor';
@@ -26,6 +27,12 @@ import {
   type PrepareTlqvInvoiceBlocker,
   type PrepareTlqvInvoiceResponse,
 } from '../preparacion/PrepareTlqvInvoiceInteractor';
+
+const DEFAULT_PAIS_CODIGO = 'ARGENTINA';
+const DEFAULT_DESCRIPCION = 'Cliente creado automáticamente desde TLQV';
+const CONSUMIDOR_FINAL_CONDICION_IMPOSITIVA = 'CONSUMIDOR FINAL';
+const CONSUMIDOR_FINAL_CATEGORIA_FISCAL = 'CF';
+const DNI_IDENTIFICACION_TRIBUTARIA = 'DNI';
 
 export type CreateXubioClienteFromTlqvStatus =
   'created' | 'already_exists' | 'blocked' | 'invalid_fiscal_document';
@@ -132,6 +139,7 @@ export class CreateXubioClienteFromTlqvInteractor {
       try {
         existingCliente = await this.findExistingXubioCliente({
           cuitDigits: cuitCompradorDigits,
+          dniDigits: deriveDniDigitsFromDocumento(cuitCompradorDigits),
           buyerName: buyerData.nombreDestinatario,
           allowNameOnlyMatch: !hasValidFiscalDocumento(cuitCompradorDigits),
         });
@@ -182,61 +190,61 @@ export class CreateXubioClienteFromTlqvInteractor {
     }
 
     const documentoTipo = inferDocumentoTipo(cuitCompradorDigits);
+    const issueContext = {
+      saleNumber: orderDetails.saleNumber ?? prepare.stockBueItem?.saleNumber,
+      buyerName: buyerData.nombreDestinatario,
+      email: buyerData.email,
+      metadata: {
+        source: 'create_xubio_cliente_from_tlqv',
+        orderDetailsSource: orderDetails.source,
+        orderDetails: {
+          tlqvCode: orderDetails.tlqvCode,
+          saleNumber: orderDetails.saleNumber,
+          source: orderDetails.source,
+        },
+        stockBue: {
+          rowNumber: prepare.stockBueItem?.rowNumber,
+          instruction: prepare.stockBueItem?.instruction,
+          description: prepare.stockBueItem?.description,
+          fechaRecepcion: prepare.stockBueItem?.fechaRecepcion,
+          fechaSalida: prepare.stockBueItem?.fechaSalida,
+          fechaLimite: prepare.stockBueItem?.fechaLimite,
+          fechaInstruccion: prepare.stockBueItem?.fechaInstruccion,
+        },
+        buyerData: {
+          nombreDestinatario: buyerData.nombreDestinatario,
+          direccion: buyerData.direccion,
+          ciudad: buyerData.ciudad,
+          provincia: buyerData.provincia,
+          codigoPostal: buyerData.codigoPostal,
+          telefono: buyerData.telefono,
+          email: buyerData.email,
+        },
+        flokzuBuyerData:
+          orderDetails.source === 'flokzu'
+            ? {
+                nombreDestinatario: buyerData.nombreDestinatario,
+                direccion: buyerData.direccion,
+                ciudad: buyerData.ciudad,
+                provincia: buyerData.provincia,
+                codigoPostal: buyerData.codigoPostal,
+                telefono: buyerData.telefono,
+                email: buyerData.email,
+              }
+            : undefined,
+      },
+    };
     let fiscalInfoResponse: GetTusFacturasAfipInfoResponse;
     try {
       fiscalInfoResponse = await new GetTusFacturasAfipInfoInteractor(
         this.tusFacturasAfipInfoRepository,
-        this.invoiceClientIssueRepository,
+        undefined,
         this.getNow,
       ).execute({
         tlqvCode: prepare.tlqvCode,
         documentoNro: cuitCompradorDigits,
         documentoTipo,
-        issueContext: {
-          saleNumber:
-            orderDetails.saleNumber ?? prepare.stockBueItem?.saleNumber,
-          buyerName: buyerData.nombreDestinatario,
-          email: buyerData.email,
-          metadata: {
-            source: 'create_xubio_cliente_from_tlqv',
-            orderDetailsSource: orderDetails.source,
-            orderDetails: {
-              tlqvCode: orderDetails.tlqvCode,
-              saleNumber: orderDetails.saleNumber,
-              source: orderDetails.source,
-            },
-            stockBue: {
-              rowNumber: prepare.stockBueItem?.rowNumber,
-              instruction: prepare.stockBueItem?.instruction,
-              description: prepare.stockBueItem?.description,
-              fechaRecepcion: prepare.stockBueItem?.fechaRecepcion,
-              fechaSalida: prepare.stockBueItem?.fechaSalida,
-              fechaLimite: prepare.stockBueItem?.fechaLimite,
-              fechaInstruccion: prepare.stockBueItem?.fechaInstruccion,
-            },
-            buyerData: {
-              nombreDestinatario: buyerData.nombreDestinatario,
-              direccion: buyerData.direccion,
-              ciudad: buyerData.ciudad,
-              provincia: buyerData.provincia,
-              codigoPostal: buyerData.codigoPostal,
-              telefono: buyerData.telefono,
-              email: buyerData.email,
-            },
-            flokzuBuyerData:
-              orderDetails.source === 'flokzu'
-                ? {
-                    nombreDestinatario: buyerData.nombreDestinatario,
-                    direccion: buyerData.direccion,
-                    ciudad: buyerData.ciudad,
-                    provincia: buyerData.provincia,
-                    codigoPostal: buyerData.codigoPostal,
-                    telefono: buyerData.telefono,
-                    email: buyerData.email,
-                  }
-                : undefined,
-          },
-        },
+        issueContext,
       });
     } catch (error: unknown) {
       return {
@@ -257,6 +265,28 @@ export class CreateXubioClienteFromTlqvInteractor {
     }
 
     if (fiscalInfoResponse.status === 'invalid_document') {
+      const consumidorFinalClienteResult =
+        await this.createConsumidorFinalClienteFromFiscalFallback({
+          tlqvCode: prepare.tlqvCode,
+          prepare,
+          orderDetails,
+          buyerData,
+          fiscalInfoResponse,
+          documentoTipo,
+          originalDocumentoDigits: cuitCompradorDigits,
+          rawPayload: fiscalInfoResponse.invalidDocument.rawPayload,
+        });
+
+      if (consumidorFinalClienteResult !== null) {
+        return consumidorFinalClienteResult;
+      }
+
+      await this.recordInvalidFiscalDocumentIssue({
+        tlqvCode: prepare.tlqvCode,
+        invalidDocument: fiscalInfoResponse.invalidDocument,
+        issueContext,
+      });
+
       return {
         status: 'invalid_fiscal_document',
         canContinue: false,
@@ -276,6 +306,22 @@ export class CreateXubioClienteFromTlqvInteractor {
       prepare.tlqvCode,
     );
     if (fiscalBlockers.length > 0) {
+      const consumidorFinalClienteResult =
+        await this.createConsumidorFinalClienteFromFiscalFallback({
+          tlqvCode: prepare.tlqvCode,
+          prepare,
+          orderDetails,
+          buyerData,
+          fiscalInfoResponse,
+          documentoTipo,
+          originalDocumentoDigits: cuitCompradorDigits,
+          rawPayload: fiscalInfo.rawPayload,
+        });
+
+      if (consumidorFinalClienteResult !== null) {
+        return consumidorFinalClienteResult;
+      }
+
       return {
         status: 'blocked',
         canContinue: false,
@@ -314,6 +360,7 @@ export class CreateXubioClienteFromTlqvInteractor {
       try {
         existingCliente = await this.findExistingXubioCliente({
           cuitDigits: cuitCompradorDigits,
+          dniDigits: deriveDniDigitsFromDocumento(cuitCompradorDigits),
           buyerName: buyerData.nombreDestinatario,
           razonSocial: fiscalInfo.razonSocial as string,
           allowNameOnlyMatch: true,
@@ -392,6 +439,7 @@ export class CreateXubioClienteFromTlqvInteractor {
 
   private async findExistingXubioCliente(command: {
     cuitDigits?: string | null;
+    dniDigits?: string | null;
     buyerName?: string | null;
     razonSocial?: string | null;
     allowNameOnlyMatch?: boolean;
@@ -402,6 +450,7 @@ export class CreateXubioClienteFromTlqvInteractor {
 
     const candidates = buildClienteSearchCandidates({
       cuitDigits: command.cuitDigits,
+      dniDigits: command.dniDigits,
       buyerName: command.buyerName,
       razonSocial: command.razonSocial,
     });
@@ -420,6 +469,148 @@ export class CreateXubioClienteFromTlqvInteractor {
     }
 
     return undefined;
+  }
+
+  private async createConsumidorFinalClienteFromFiscalFallback(command: {
+    tlqvCode: string;
+    prepare: PrepareTlqvInvoiceResponse;
+    orderDetails: TlqvOrderDetails;
+    buyerData: TlqvOrderBuyerData;
+    fiscalInfoResponse: GetTusFacturasAfipInfoResponse;
+    documentoTipo: TusFacturasDocumentoTipo;
+    originalDocumentoDigits: string;
+    rawPayload: unknown;
+  }): Promise<CreateXubioClienteFromTlqvResponse | null> {
+    const dniDigits = deriveDniDigitsFromDocumento(
+      command.originalDocumentoDigits,
+    );
+    const buyerName = normalizeOptionalString(
+      command.buyerData.nombreDestinatario,
+    );
+
+    if (dniDigits === null || buyerName === null) {
+      return null;
+    }
+
+    const fiscalInfo = buildConsumidorFinalFiscalInfo({
+      dniDigits,
+      buyerName,
+      buyerData: command.buyerData,
+      rawPayload: command.rawPayload,
+    });
+    let xubioClienteResult = await this.createXubioClienteRepository.create({
+      cliente: buildConsumidorFinalClientePayload({
+        dniDigits,
+        originalDocumentoDigits: command.originalDocumentoDigits,
+        buyerName,
+        buyerData: command.buyerData,
+      }),
+    });
+
+    if (
+      xubioClienteResult.status === 'already_exists' &&
+      xubioClienteResult.cliente === undefined &&
+      this.findXubioClienteRepository !== undefined
+    ) {
+      let existingCliente: XubioCliente | undefined;
+      try {
+        existingCliente = await this.findExistingXubioCliente({
+          cuitDigits: command.originalDocumentoDigits,
+          dniDigits,
+          buyerName,
+          razonSocial: buyerName,
+          allowNameOnlyMatch: true,
+        });
+      } catch (error: unknown) {
+        return {
+          status: 'blocked',
+          canContinue: false,
+          tlqvCode: command.tlqvCode,
+          prepare: command.prepare,
+          orderDetails: command.orderDetails,
+          buyerData: command.buyerData,
+          fiscalInfoResponse: command.fiscalInfoResponse,
+          documentoTipo: command.documentoTipo,
+          blockers: [
+            {
+              code: 'XUBIO_EXISTING_CLIENT_LOOKUP_FAILED',
+              message: `Xubio consumidor final cliente already exists, but the existing client lookup failed. ${readErrorMessage(error)}`,
+            },
+          ],
+        };
+      }
+
+      if (existingCliente === undefined) {
+        return {
+          status: 'blocked',
+          canContinue: false,
+          tlqvCode: command.tlqvCode,
+          prepare: command.prepare,
+          orderDetails: command.orderDetails,
+          buyerData: command.buyerData,
+          fiscalInfoResponse: command.fiscalInfoResponse,
+          documentoTipo: command.documentoTipo,
+          blockers: [
+            {
+              code: 'XUBIO_EXISTING_CLIENT_NOT_FOUND',
+              message:
+                'Xubio consumidor final cliente already exists, but it could not be found by DNI, CUIT or usrCode.',
+            },
+          ],
+        };
+      }
+
+      xubioClienteResult = {
+        ...xubioClienteResult,
+        cliente: existingCliente,
+      };
+    }
+
+    return {
+      status: xubioClienteResult.status,
+      canContinue: true,
+      tlqvCode: command.tlqvCode,
+      prepare: command.prepare,
+      orderDetails: command.orderDetails,
+      buyerData: command.buyerData,
+      fiscalInfoResponse: command.fiscalInfoResponse,
+      fiscalInfo,
+      documentoTipo: command.documentoTipo,
+      xubioClienteResult,
+    };
+  }
+
+  private async recordInvalidFiscalDocumentIssue(command: {
+    tlqvCode: string;
+    invalidDocument: TusFacturasAfipInfoInvalidDocument;
+    issueContext: {
+      saleNumber?: string | null;
+      buyerName?: string | null;
+      email?: string | null;
+      metadata?: unknown;
+    };
+  }): Promise<void> {
+    if (this.invoiceClientIssueRepository === undefined) {
+      return;
+    }
+
+    await this.invoiceClientIssueRepository.upsert({
+      tlqvCode: command.tlqvCode,
+      reason: 'INVALID_FISCAL_DOCUMENT',
+      source: 'tus_facturas',
+      saleNumber: command.issueContext.saleNumber,
+      buyerName: command.issueContext.buyerName,
+      email: command.issueContext.email,
+      cuit: command.invalidDocument.documentoNro,
+      documentoTipo: command.invalidDocument.documentoTipo,
+      documentoNro: command.invalidDocument.documentoNro,
+      documentoNroDigits: command.invalidDocument.documentoNroDigits,
+      message: command.invalidDocument.message,
+      messages: command.invalidDocument.messages,
+      rawPayload: command.invalidDocument.rawPayload,
+      metadata: command.issueContext.metadata,
+      now: this.getNow(),
+    });
   }
 }
 
@@ -464,7 +655,8 @@ function buildFiscalInfoFromExistingCliente(
     normalizeOptionalString(fallbackDocumentoDigits) ??
     '';
   const documentoNroDigits = normalizeDocumentDigits(rawDocumento);
-  const documentoTipo = inferDocumentoTipoFromOptionalDigits(documentoNroDigits);
+  const documentoTipo =
+    inferDocumentoTipoFromOptionalDigits(documentoNroDigits);
 
   return {
     documentoNro: rawDocumento,
@@ -549,6 +741,7 @@ function inferDocumentoTipo(digits: string): TusFacturasDocumentoTipo {
 
 function buildClienteSearchCandidates(command: {
   cuitDigits?: string | null;
+  dniDigits?: string | null;
   buyerName?: string | null;
   razonSocial?: string | null;
 }): string[] {
@@ -557,10 +750,18 @@ function buildClienteSearchCandidates(command: {
     cuitDigits === null
       ? []
       : [`TLQV-${cuitDigits}`, formatCuitIfPossible(cuitDigits), cuitDigits];
+  const dniDigits = normalizeOptionalString(command.dniDigits);
+  const dniCandidates =
+    dniDigits === null ? [] : [formatDni(dniDigits), dniDigits];
 
   return Array.from(
     new Set(
-      [command.buyerName, command.razonSocial, ...cuitCandidates]
+      [
+        command.buyerName,
+        command.razonSocial,
+        ...cuitCandidates,
+        ...dniCandidates,
+      ]
         .map((value) => normalizeOptionalString(value))
         .filter((value): value is string => value !== null),
     ),
@@ -571,12 +772,14 @@ function matchesExistingCliente(
   cliente: XubioCliente,
   command: {
     cuitDigits?: string | null;
+    dniDigits?: string | null;
     buyerName?: string | null;
     razonSocial?: string | null;
     allowNameOnlyMatch?: boolean;
   },
 ): boolean {
   const cuitDigits = normalizeOptionalString(command.cuitDigits);
+  const dniDigits = normalizeOptionalString(command.dniDigits);
 
   if (cuitDigits !== null) {
     const expectedUsrCode = normalizeForComparison(`TLQV-${cuitDigits}`);
@@ -587,6 +790,15 @@ function matchesExistingCliente(
     if (
       normalizeDocumentDigits(cliente.cuit) === cuitDigits ||
       normalizeDocumentDigits(cliente.dni) === cuitDigits
+    ) {
+      return true;
+    }
+  }
+
+  if (dniDigits !== null) {
+    if (
+      normalizeDocumentDigits(cliente.cuit) === dniDigits ||
+      normalizeDocumentDigits(cliente.dni) === dniDigits
     ) {
       return true;
     }
@@ -623,6 +835,119 @@ function formatCuitIfPossible(digits: string): string {
 
 function hasValidFiscalDocumento(value: string | null | undefined): boolean {
   return normalizeOptionalString(value)?.replace(/\D/g, '').length === 11;
+}
+
+function deriveDniDigitsFromDocumento(
+  value: string | null | undefined,
+): string | null {
+  const digits = normalizeDocumentDigits(value);
+
+  if (digits.length === 11) {
+    return digits.slice(2, 10);
+  }
+
+  return isDniLength(digits) ? digits : null;
+}
+
+function isDniLength(value: string): boolean {
+  return value.length >= 7 && value.length <= 8;
+}
+
+function formatDni(digits: string): string {
+  return digits.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+}
+
+function buildConsumidorFinalFiscalInfo(command: {
+  dniDigits: string;
+  buyerName: string;
+  buyerData: TlqvOrderBuyerData;
+  rawPayload: unknown;
+}): TusFacturasAfipInfo {
+  return {
+    documentoNro: formatDni(command.dniDigits),
+    documentoNroDigits: command.dniDigits,
+    documentoTipo: 'CUIT',
+    razonSocial: command.buyerName,
+    condicionImpositiva: CONSUMIDOR_FINAL_CONDICION_IMPOSITIVA,
+    direccion: command.buyerData.direccion,
+    codigoPostal: normalizeCodigoPostal(command.buyerData.codigoPostal),
+    provincia: command.buyerData.provincia,
+    rawPayload: command.rawPayload,
+  };
+}
+
+function buildConsumidorFinalClientePayload(command: {
+  dniDigits: string;
+  originalDocumentoDigits: string;
+  buyerName: string;
+  buyerData: TlqvOrderBuyerData;
+}): XubioClientePayload {
+  const nameParts = splitName(command.buyerName);
+  const formattedDni = formatDni(command.dniDigits);
+  const provincia = normalizeOptionalString(command.buyerData.provincia);
+
+  return {
+    nombre: command.buyerName,
+    razonSocial: command.buyerName,
+    primerNombre: nameParts.primerNombre,
+    primerApellido: nameParts.primerApellido,
+    identificacionTributaria: {
+      codigo: DNI_IDENTIFICACION_TRIBUTARIA,
+    },
+    categoriaFiscal: {
+      codigo: CONSUMIDOR_FINAL_CATEGORIA_FISCAL,
+    },
+    pais: {
+      codigo: DEFAULT_PAIS_CODIGO,
+    },
+    cuit: formattedDni,
+    CUIT: formattedDni,
+    direccion: normalizeOptionalString(command.buyerData.direccion),
+    codigoPostal: normalizeCodigoPostal(command.buyerData.codigoPostal),
+    provincia:
+      provincia === null
+        ? null
+        : {
+            nombre: provincia,
+          },
+    usrCode: `TLQV-${command.originalDocumentoDigits}`,
+    descripcion: DEFAULT_DESCRIPCION,
+    esclienteextranjero: 0,
+    esProveedor: 0,
+  };
+}
+
+function normalizeCodigoPostal(
+  value: string | null | undefined,
+): string | null {
+  const normalizedValue = normalizeOptionalString(value);
+  return normalizedValue?.replace(/^CP:\s*/i, '').trim() ?? null;
+}
+
+function splitName(value: string): {
+  primerNombre: string | null;
+  primerApellido: string | null;
+} {
+  const parts = value.split(/\s+/).filter((part) => part !== '');
+
+  if (parts.length === 0) {
+    return {
+      primerNombre: null,
+      primerApellido: null,
+    };
+  }
+
+  if (parts.length === 1) {
+    return {
+      primerNombre: parts[0],
+      primerApellido: null,
+    };
+  }
+
+  return {
+    primerNombre: parts[0],
+    primerApellido: parts.slice(1).join(' '),
+  };
 }
 
 function inferDocumentoTipoFromOptionalDigits(

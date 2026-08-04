@@ -13,7 +13,11 @@ import {
   ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
-import type { InvoiceClientIssueReason } from '../../core/entities/invoice/client-issues/InvoiceClientIssue';
+import {
+  INVOICE_CLIENT_ISSUE_REASONS,
+  type InvoiceClientIssueReason,
+  type InvoiceClientIssueStatus,
+} from '../../core/entities/invoice/client-issues/InvoiceClientIssue';
 import { InternalApiKeyGuard } from '../guards/internal-api-key.guard';
 import { ApiInternalEndpoint } from '../modules/shared/swagger/internal-api-docs.decorators';
 import { TlqvInvoiceIssuesService } from '../services/tlqv-invoice-issues.service';
@@ -35,18 +39,18 @@ export class TlqvInvoiceIssuesController {
   @ApiQuery({
     name: 'reason',
     required: false,
-    enum: [
-      'INVALID_FISCAL_DOCUMENT',
-      'XUBIO_CLIENT_ALREADY_EXISTS',
-      'MISSING_BUYER_CUIT',
-      'MISSING_FISCAL_RAZON_SOCIAL',
-      'MISSING_FISCAL_CONDICION_IMPOSITIVA',
-    ],
+    enum: INVOICE_CLIENT_ISSUE_REASONS,
   })
   @ApiQuery({
     name: 'limit',
     required: false,
     example: 100,
+  })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: ['open', 'resolved', 'ignored'],
+    example: 'open',
   })
   @ApiOkResponse({
     description: 'Snapshot de issues.',
@@ -67,9 +71,14 @@ export class TlqvInvoiceIssuesController {
     },
   })
   @Get()
-  getIssues(@Query('reason') reason?: string, @Query('limit') limit?: string) {
+  getIssues(
+    @Query('reason') reason?: string,
+    @Query('status') status?: string,
+    @Query('limit') limit?: string,
+  ) {
     return this.tlqvInvoiceIssuesService.getSnapshot({
       reason: parseOptionalReason(reason),
+      status: parseOptionalStatus(status),
       limit: parseOptionalPositiveInteger(limit, 'limit'),
     });
   }
@@ -116,18 +125,33 @@ function parseOptionalReason(
   }
 
   if (
-    value !== 'INVALID_FISCAL_DOCUMENT' &&
-    value !== 'XUBIO_CLIENT_ALREADY_EXISTS' &&
-    value !== 'MISSING_BUYER_CUIT' &&
-    value !== 'MISSING_FISCAL_RAZON_SOCIAL' &&
-    value !== 'MISSING_FISCAL_CONDICION_IMPOSITIVA'
+    !INVOICE_CLIENT_ISSUE_REASONS.includes(value as InvoiceClientIssueReason)
   ) {
     throw new BadRequestException(
       'reason must be a known invoice client issue reason',
     );
   }
 
-  return value;
+  return value as InvoiceClientIssueReason;
+}
+
+function parseOptionalStatus(
+  value: string | undefined,
+): InvoiceClientIssueStatus | undefined {
+  if (value === undefined || value.trim() === '') {
+    return undefined;
+  }
+
+  const normalizedValue = value.trim();
+  if (
+    normalizedValue !== 'open' &&
+    normalizedValue !== 'resolved' &&
+    normalizedValue !== 'ignored'
+  ) {
+    throw new BadRequestException('status must be open, resolved or ignored');
+  }
+
+  return normalizedValue;
 }
 
 function parseOptionalPositiveInteger(

@@ -205,7 +205,22 @@ function parseAfipInfoResponse(
   documentoNroDigits: string,
   documentoTipo: TusFacturasDocumentoTipo,
 ): GetTusFacturasAfipInfoResponse {
+  const fiscalInfo = findFiscalInfoSource(value);
+
   if (isInvalidDocumentResponse(value)) {
+    if (
+      fiscalInfo !== undefined &&
+      hasUsableFiscalInfoFromInvalidResponse(fiscalInfo)
+    ) {
+      return buildFoundResponse(
+        value,
+        fiscalInfo,
+        documentoNro,
+        documentoNroDigits,
+        documentoTipo,
+      );
+    }
+
     return {
       status: 'invalid_document',
       found: false,
@@ -218,13 +233,28 @@ function parseAfipInfoResponse(
     };
   }
 
-  const fiscalInfo = findFiscalInfoSource(value);
   if (fiscalInfo === undefined) {
     throw new TusFacturasAfipInfoInvalidResponseError(
       'could not find AFIP info fields in response',
     );
   }
 
+  return buildFoundResponse(
+    value,
+    fiscalInfo,
+    documentoNro,
+    documentoNroDigits,
+    documentoTipo,
+  );
+}
+
+function buildFoundResponse(
+  rawPayload: unknown,
+  fiscalInfo: Record<string, unknown>,
+  documentoNro: string,
+  documentoNroDigits: string,
+  documentoTipo: TusFacturasDocumentoTipo,
+): GetTusFacturasAfipInfoResponse {
   return {
     status: 'found',
     found: true,
@@ -242,7 +272,7 @@ function parseAfipInfoResponse(
       codigoPostal: readOptionalString(fiscalInfo, 'codigopostal'),
       provincia: readOptionalString(fiscalInfo, 'provincia'),
       estado: readOptionalString(fiscalInfo, 'estado'),
-      rawPayload: value,
+      rawPayload,
     },
   };
 }
@@ -329,6 +359,24 @@ function hasAnyFiscalInfoField(value: Record<string, unknown>): boolean {
   return FISCAL_INFO_FIELDS.some((field) => value[field] !== undefined);
 }
 
+function hasUsableFiscalInfoFromInvalidResponse(
+  value: Record<string, unknown>,
+): boolean {
+  return (
+    hasNonEmptyStringField(value, 'razon_social') &&
+    hasNonEmptyStringField(value, 'condicion_impositiva') &&
+    hasNonEmptyStringField(value, 'estado')
+  );
+}
+
+function hasNonEmptyStringField(
+  value: Record<string, unknown>,
+  field: string,
+): boolean {
+  const fieldValue = value[field];
+  return typeof fieldValue === 'string' && fieldValue.trim() !== '';
+}
+
 function buildRequestError(
   documentoNro: string,
   error: unknown,
@@ -388,7 +436,9 @@ function normalizeRetryDelay(value: number | undefined): number {
   }
 
   if (!Number.isInteger(value) || value < 0) {
-    throw new RangeError('retryDelayInMilliseconds must be a non-negative integer');
+    throw new RangeError(
+      'retryDelayInMilliseconds must be a non-negative integer',
+    );
   }
 
   return value;

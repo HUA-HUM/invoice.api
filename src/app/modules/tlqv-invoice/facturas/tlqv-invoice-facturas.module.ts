@@ -5,6 +5,7 @@ import { TlqvInvoiceFacturasService } from '../../../services/tlqv-invoice-factu
 import { InternalAuthModule } from '../../shared/internal-auth/internal-auth.module';
 import { RedisInfrastructureModule } from '../../shared/redis/redis-infrastructure.module';
 import { TlqvInvoiceClientesModule } from '../clientes/tlqv-invoice-clientes.module';
+import { TlqvInvoiceIssuesModule } from '../issues/tlqv-invoice-issues.module';
 import { tlqvInvoiceFacturasInteractorProviders } from './tlqv-invoice-facturas.providers';
 
 @Module({
@@ -12,6 +13,7 @@ import { tlqvInvoiceFacturasInteractorProviders } from './tlqv-invoice-facturas.
     InternalAuthModule,
     RedisInfrastructureModule,
     TlqvInvoiceClientesModule,
+    TlqvInvoiceIssuesModule,
   ],
   controllers: [TlqvInvoiceFacturasController],
   providers: [

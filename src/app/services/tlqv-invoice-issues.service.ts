@@ -4,6 +4,7 @@ import type {
   GetInvoiceClientIssueByTlqvCodeResponse,
   InvoiceClientIssueReason,
   InvoiceClientIssueSnapshot,
+  InvoiceClientIssueStatus,
 } from '../../core/entities/invoice/client-issues/InvoiceClientIssue';
 import { INVOICE_CLIENT_ISSUES_REPOSITORY } from '../modules/tlqv-invoice/issues/tlqv-invoice-issues.providers';
 
@@ -16,6 +17,7 @@ export class TlqvInvoiceIssuesService {
 
   getSnapshot(command: {
     reason?: InvoiceClientIssueReason;
+    status?: InvoiceClientIssueStatus;
     limit?: number;
   }): Promise<InvoiceClientIssueSnapshot> {
     return this.repository.getSnapshot(command);
