@@ -527,8 +527,12 @@ describe('CreateXubioClienteFromTlqvInteractor', () => {
         documentoTipo: 'CUIT',
         documentoNro: '1',
         documentoNroDigits: '1',
-        message: 'No pudimos obtener datos para el CUIT ingresado.',
-        messages: ['No pudimos obtener datos para el CUIT ingresado.'],
+        message:
+          'TLQV-14921 trae documento fiscal "1" (1 dígitos). No se puede consultar TusFacturas ni derivar un DNI/CUIT válido automáticamente. Hay que corregir el documento o cargarlo manualmente como consumidor final.',
+        messages: [
+          'TLQV-14921 trae documento fiscal "1" (1 dígitos). No se puede consultar TusFacturas ni derivar un DNI/CUIT válido automáticamente. Hay que corregir el documento o cargarlo manualmente como consumidor final.',
+          'No pudimos obtener datos para el CUIT ingresado.',
+        ],
         rawPayload: { error: 'S' },
         now: new Date('2026-07-07T12:00:00.000Z'),
       }),

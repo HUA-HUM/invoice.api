@@ -1,9 +1,15 @@
 import type { IStockBueTlqvCacheRepository } from '../../../adapters/repositories/cache/stock-bue/IStockBueTlqvCacheRepository';
 import type { IMadreXubioComprobantesRepository } from '../../../adapters/repositories/madre-api/xubio/comprobantes/IMadreXubioComprobantesRepository';
-import type { StockBueTlqvCacheItem } from '../../../entities/cache/stock-bue/StockBueTlqvCache';
+import type {
+  StockBueTlqvCacheItem,
+  StockBueTlqvCacheLookup,
+} from '../../../entities/cache/stock-bue/StockBueTlqvCache';
 import type { MadreXubioComprobanteTlqvLookupItem } from '../../../entities/madre-api/xubio/comprobantes/MadreXubioComprobante';
+import type { IGetStockBueItemByTlqvCodeRepository } from '../../../adapters/repositories/spreadsheet-api/stock-bue/IGetStockBueItemByTlqvCodeRepository';
 import {
   STOCK_BUE_DISPATCHED_INSTRUCTION,
+  type GetStockBueItemByTlqvCodeResponse,
+  type StockBueItem,
   type StockBueItemData,
 } from '../../../entities/spreadsheet-api/stock-bue/StockBueItems';
 import { normalizeTlqvCode } from '../../stock-bue/FindUnbilledDispatchedStockBueTlqvInteractor';
@@ -48,6 +54,7 @@ export interface PrepareTlqvInvoiceResponse {
   billingValidationAvailable: boolean;
   billingValidationErrorMessage?: string;
   cacheRefreshedAt?: string;
+  stockBueSource?: 'cache' | 'spreadsheet_api_direct';
   blockers: PrepareTlqvInvoiceBlocker[];
   billedComprobantes: MadreXubioComprobanteTlqvLookupItem[];
   stockBueItem?: PrepareTlqvInvoiceStockBueItem;
@@ -57,6 +64,7 @@ export class PrepareTlqvInvoiceInteractor {
   constructor(
     private readonly stockBueTlqvCacheRepository: IStockBueTlqvCacheRepository,
     private readonly madreXubioComprobantesRepository: IMadreXubioComprobantesRepository,
+    private readonly stockBueItemByTlqvCodeRepository?: IGetStockBueItemByTlqvCodeRepository,
   ) {}
 
   async execute(
@@ -67,18 +75,21 @@ export class PrepareTlqvInvoiceInteractor {
       this.stockBueTlqvCacheRepository.getByTlqvCode(tlqvCode),
       this.checkBilledValidation(tlqvCode),
     ]);
+    const stockBueLookup = await this.resolveStockBueLookup(
+      tlqvCode,
+      cacheLookup,
+    );
     const billingValidationAvailable = billingLookup.status === 'found';
     const isBilled =
       billingLookup.status === 'found' ? billingLookup.exists : false;
-    const stockBueItem =
-      cacheLookup.item === undefined
-        ? undefined
-        : toStockBueItem(cacheLookup.item);
+    const stockBueItem = stockBueLookup.item;
     const isDispatched =
       normalizeInstruction(stockBueItem?.instruction) ===
       STOCK_BUE_DISPATCHED_INSTRUCTION;
     const blockers = buildBlockers({
-      cacheReady: cacheLookup.metadata !== undefined,
+      cacheReady:
+        cacheLookup.metadata !== undefined ||
+        stockBueLookup.source === 'spreadsheet_api_direct',
       billingValidationAvailable,
       billingValidationErrorMessage:
         billingLookup.status === 'unavailable'
@@ -102,6 +113,7 @@ export class PrepareTlqvInvoiceInteractor {
           ? billingLookup.errorMessage
           : undefined,
       cacheRefreshedAt: cacheLookup.metadata?.refreshedAt,
+      stockBueSource: stockBueLookup.source,
       blockers,
       billedComprobantes: [],
       stockBueItem,
@@ -134,6 +146,58 @@ export class PrepareTlqvInvoiceInteractor {
         errorMessage: readErrorMessage(error),
       };
     }
+  }
+
+  private async resolveStockBueLookup(
+    tlqvCode: string,
+    cacheLookup: StockBueTlqvCacheLookup,
+  ): Promise<{
+    source?: 'cache' | 'spreadsheet_api_direct';
+    item?: PrepareTlqvInvoiceStockBueItem;
+  }> {
+    const cacheItem =
+      cacheLookup.item === undefined
+        ? undefined
+        : toStockBueItem(cacheLookup.item);
+
+    if (
+      cacheItem !== undefined &&
+      normalizeInstruction(cacheItem.instruction) ===
+        STOCK_BUE_DISPATCHED_INSTRUCTION
+    ) {
+      return {
+        source: 'cache',
+        item: cacheItem,
+      };
+    }
+
+    if (this.stockBueItemByTlqvCodeRepository === undefined) {
+      return cacheItem === undefined
+        ? {}
+        : { source: 'cache', item: cacheItem };
+    }
+
+    let response: GetStockBueItemByTlqvCodeResponse;
+    try {
+      response = await this.stockBueItemByTlqvCodeRepository.getByTlqvCode({
+        tlqvCode,
+      });
+    } catch (_error: unknown) {
+      return cacheItem === undefined
+        ? {}
+        : { source: 'cache', item: cacheItem };
+    }
+
+    if (!response.found) {
+      return cacheItem === undefined
+        ? {}
+        : { source: 'cache', item: cacheItem };
+    }
+
+    return {
+      source: 'spreadsheet_api_direct',
+      item: toStockBueItemFromSpreadsheet(response.item),
+    };
   }
 }
 
@@ -198,6 +262,23 @@ function toStockBueItem(
     fechaLimite: item.fechaLimite,
     fechaInstruccion: item.fechaInstruccion,
     rawData: item.rawData,
+  };
+}
+
+function toStockBueItemFromSpreadsheet(
+  item: StockBueItem,
+): PrepareTlqvInvoiceStockBueItem {
+  return {
+    tlqvCode: normalizeRequiredTlqvCode(item.data.TLQV ?? ''),
+    rowNumber: item.rowNumber,
+    instruction: item.data.Instruccion,
+    saleNumber: item.data['N venta'],
+    description: item.data.Descripción,
+    fechaRecepcion: item.data['Fecha recepcion'],
+    fechaSalida: item.data['Fecha Salida'],
+    fechaLimite: item.data['Fecha Limite'],
+    fechaInstruccion: item.data['fecha Instruccion'],
+    rawData: item.data,
   };
 }
 

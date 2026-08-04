@@ -1,5 +1,6 @@
 import type { IStockBueTlqvCacheRepository } from '../../../adapters/repositories/cache/stock-bue/IStockBueTlqvCacheRepository';
 import type { IMadreXubioComprobantesRepository } from '../../../adapters/repositories/madre-api/xubio/comprobantes/IMadreXubioComprobantesRepository';
+import type { IGetStockBueItemByTlqvCodeRepository } from '../../../adapters/repositories/spreadsheet-api/stock-bue/IGetStockBueItemByTlqvCodeRepository';
 import { PrepareTlqvInvoiceInteractor } from '../preparacion/PrepareTlqvInvoiceInteractor';
 
 describe('PrepareTlqvInvoiceInteractor', () => {
@@ -115,6 +116,50 @@ describe('PrepareTlqvInvoiceInteractor', () => {
     ]);
   });
 
+  it('revalidates directly when cache item exists but is not dispatched', async () => {
+    const cacheRepository = createCacheRepository();
+    cacheRepository.getByTlqvCode.mockResolvedValue({
+      metadata: createCacheMetadata(),
+      item: createCacheItem('TLQV-15239', 'PENDIENTE'),
+    });
+    const comprobantesRepository = createComprobantesRepository();
+    comprobantesRepository.existsByTlqvCode.mockResolvedValue({
+      tlqvCode: 'TLQV-15239',
+      exists: false,
+    });
+    const stockBueItemRepository = createStockBueItemRepository();
+    stockBueItemRepository.getByTlqvCode.mockResolvedValue({
+      found: true,
+      tlqvCode: 'TLQV-15239',
+      item: {
+        rowNumber: 8921,
+        data: {
+          TLQV: 'TLQV-15239',
+          'N venta': '2291-1',
+          Instruccion: 'DESPACHADA',
+        },
+      },
+    });
+    const interactor = new PrepareTlqvInvoiceInteractor(
+      cacheRepository,
+      comprobantesRepository,
+      stockBueItemRepository,
+    );
+
+    const result = await interactor.execute({ tlqvCode: 'TLQV-15239' });
+
+    expect(stockBueItemRepository.getByTlqvCode).toHaveBeenCalledWith({
+      tlqvCode: 'TLQV-15239',
+    });
+    expect(result.status).toBe('READY');
+    expect(result.canContinue).toBe(true);
+    expect(result.stockBueSource).toBe('spreadsheet_api_direct');
+    expect(result.stockBueItem).toMatchObject({
+      tlqvCode: 'TLQV-15239',
+      instruction: 'DESPACHADA',
+    });
+  });
+
   it('blocks clearly when the stock-bue cache is not ready', async () => {
     const cacheRepository = createCacheRepository();
     cacheRepository.getByTlqvCode.mockResolvedValue({});
@@ -135,6 +180,85 @@ describe('PrepareTlqvInvoiceInteractor', () => {
       expect.objectContaining({ code: 'CACHE_NOT_READY' }),
       expect.objectContaining({ code: 'NOT_FOUND_IN_STOCK_BUE' }),
     ]);
+  });
+
+  it('uses direct stock-bue lookup when cache has no item', async () => {
+    const cacheRepository = createCacheRepository();
+    cacheRepository.getByTlqvCode.mockResolvedValue({
+      metadata: createCacheMetadata(),
+    });
+    const comprobantesRepository = createComprobantesRepository();
+    comprobantesRepository.existsByTlqvCode.mockResolvedValue({
+      tlqvCode: 'TLQV-15239',
+      exists: false,
+    });
+    const stockBueItemRepository = createStockBueItemRepository();
+    stockBueItemRepository.getByTlqvCode.mockResolvedValue({
+      found: true,
+      tlqvCode: 'TLQV-15239',
+      item: {
+        rowNumber: 8921,
+        data: {
+          TLQV: 'TLQV-15239',
+          'N venta': '2291-1',
+          Descripción: 'Capzasin Quick Relief Gel',
+          Instruccion: 'DESPACHADA',
+        },
+      },
+    });
+    const interactor = new PrepareTlqvInvoiceInteractor(
+      cacheRepository,
+      comprobantesRepository,
+      stockBueItemRepository,
+    );
+
+    const result = await interactor.execute({ tlqvCode: 'TLQV-15239' });
+
+    expect(stockBueItemRepository.getByTlqvCode).toHaveBeenCalledWith({
+      tlqvCode: 'TLQV-15239',
+    });
+    expect(result.status).toBe('READY');
+    expect(result.canContinue).toBe(true);
+    expect(result.stockBueSource).toBe('spreadsheet_api_direct');
+    expect(result.stockBueItem).toMatchObject({
+      tlqvCode: 'TLQV-15239',
+      rowNumber: 8921,
+      instruction: 'DESPACHADA',
+      saleNumber: '2291-1',
+    });
+  });
+
+  it('uses direct stock-bue lookup when cache is not ready', async () => {
+    const cacheRepository = createCacheRepository();
+    cacheRepository.getByTlqvCode.mockResolvedValue({});
+    const comprobantesRepository = createComprobantesRepository();
+    comprobantesRepository.existsByTlqvCode.mockResolvedValue({
+      tlqvCode: 'TLQV-15239',
+      exists: false,
+    });
+    const stockBueItemRepository = createStockBueItemRepository();
+    stockBueItemRepository.getByTlqvCode.mockResolvedValue({
+      found: true,
+      tlqvCode: 'TLQV-15239',
+      item: {
+        rowNumber: 8921,
+        data: {
+          TLQV: 'TLQV-15239',
+          Instruccion: 'DESPACHADA',
+        },
+      },
+    });
+    const interactor = new PrepareTlqvInvoiceInteractor(
+      cacheRepository,
+      comprobantesRepository,
+      stockBueItemRepository,
+    );
+
+    const result = await interactor.execute({ tlqvCode: 'TLQV-15239' });
+
+    expect(result.status).toBe('READY');
+    expect(result.blockers).toEqual([]);
+    expect(result.stockBueSource).toBe('spreadsheet_api_direct');
   });
 
   it('blocks safely when billing validation against Madre is unavailable', async () => {
@@ -192,6 +316,14 @@ function createComprobantesRepository(): IMadreXubioComprobantesRepository & {
     findByTlqvCodes: jest.fn(),
     findByTlqvCode: jest.fn(),
     existsByTlqvCode: jest.fn(),
+  };
+}
+
+function createStockBueItemRepository(): IGetStockBueItemByTlqvCodeRepository & {
+  getByTlqvCode: jest.Mock;
+} {
+  return {
+    getByTlqvCode: jest.fn(),
   };
 }
 

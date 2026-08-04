@@ -1,4 +1,5 @@
 import type { IGetMadreItemByTlqvCodeRepository } from '../../../adapters/repositories/spreadsheet-api/madre/IGetMadreItemByTlqvCodeRepository';
+import type { IGetStockBueItemByTlqvCodeRepository } from '../../../adapters/repositories/spreadsheet-api/stock-bue/IGetStockBueItemByTlqvCodeRepository';
 import type { IGetTlqvItemByCodeRepository } from '../../../adapters/repositories/spreadsheet-api/tlqv/IGetTlqvItemByCodeRepository';
 import type { TlqvItemData } from '../../../entities/spreadsheet-api/tlqv/TlqvItems';
 import type { CreateXubioClienteFromTlqvResponse } from '../clientes/CreateXubioClienteFromTlqvInteractor';
@@ -106,7 +107,7 @@ describe('CreateTlqvInvoiceFlowInteractor', () => {
       {
         code: 'INVALID_FISCAL_DOCUMENT',
         message:
-          'TLQV-1569 tiene un documento fiscal inválido. Se guarda como issue de cliente en Madre y se saltea la creación de factura. documentoNro must contain exactly 11 digits',
+          'TLQV-1569 trae documento fiscal "26172071" (8 dígitos). No se puede consultar TusFacturas ni derivar un DNI/CUIT válido automáticamente. Se guarda como issue de cliente en Madre y se saltea la creación de factura.',
         step: 'client',
       },
     ]);
@@ -168,6 +169,63 @@ describe('CreateTlqvInvoiceFlowInteractor', () => {
       tlqvCode: 'TLQV-1569',
     });
     expect(result.sourceData?.tlqvSheet.found).toBe(true);
+  });
+
+  it('validates stock-bue directly when the financial TLQV sheet item is missing', async () => {
+    const dependencies = createDependencies();
+    dependencies.tlqvSheet.getByCode.mockResolvedValue({
+      found: false,
+      tlqvCode: 'TLQV-15239',
+      reason: 'not_found',
+    });
+    dependencies.fallbackTlqvSheet.getByCode.mockResolvedValue({
+      found: false,
+      tlqvCode: 'TLQV-15239',
+      reason: 'not_found',
+    });
+    dependencies.stockBueSheet.getByTlqvCode.mockResolvedValue({
+      found: true,
+      tlqvCode: 'TLQV-15239',
+      item: {
+        rowNumber: 8921,
+        data: {
+          TLQV: 'TLQV-15239',
+          'N venta': '2291-1',
+          Instruccion: 'DESPACHADA',
+        },
+      },
+    });
+    const interactor = createInteractor(dependencies);
+
+    const result = await interactor.execute({ tlqvCode: 'TLQV-15239' });
+
+    expect(result.status).toBe('blocked');
+    if (result.status !== 'blocked') {
+      throw new Error('Expected blocked response');
+    }
+    expect(dependencies.stockBueSheet.getByTlqvCode).toHaveBeenCalledWith({
+      tlqvCode: 'TLQV-15239',
+    });
+    expect(result.sourceData?.stockBueSheet).toEqual({
+      found: true,
+      tlqvCode: 'TLQV-15239',
+      item: {
+        rowNumber: 8921,
+        data: {
+          TLQV: 'TLQV-15239',
+          'N venta': '2291-1',
+          Instruccion: 'DESPACHADA',
+        },
+      },
+    });
+    expect(result.blockers).toEqual([
+      {
+        code: 'TLQV_SHEET_ITEM_NOT_FOUND',
+        message:
+          'TLQV-15239 no existe en la solapa financiera TLQV de prueba-lectura. Esa solapa es necesaria para calcular importes de factura. En stock-bue sí existe en row 8921, venta 2291-1, con Instruccion "DESPACHADA". La orden está despachada, pero faltan los importes financieros para facturar.',
+        step: 'source_data',
+      },
+    ]);
   });
 
   it('skips invoice creation when dryRun is enabled', async () => {
@@ -328,6 +386,7 @@ interface TestDependencies {
   tlqvSheet: jest.Mocked<IGetTlqvItemByCodeRepository>;
   fallbackTlqvSheet: jest.Mocked<IGetTlqvItemByCodeRepository>;
   madreSheet: jest.Mocked<IGetMadreItemByTlqvCodeRepository>;
+  stockBueSheet: jest.Mocked<IGetStockBueItemByTlqvCodeRepository>;
   createInvoice: jest.Mocked<ICreateXubioInvoiceRepository>;
 }
 
@@ -342,6 +401,7 @@ function createInteractor(
     undefined,
     () => '2026-07-30',
     dependencies.fallbackTlqvSheet,
+    dependencies.stockBueSheet,
   );
 }
 
@@ -388,6 +448,13 @@ function createDependencies(
             COSTOENVIO: '$16,328.49',
           },
         },
+      }),
+    },
+    stockBueSheet: {
+      getByTlqvCode: jest.fn().mockResolvedValue({
+        found: false,
+        tlqvCode: 'TLQV-1569',
+        reason: 'not_found',
       }),
     },
     createInvoice: {

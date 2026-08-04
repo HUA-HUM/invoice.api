@@ -1,6 +1,7 @@
 import type { IInvoiceClientIssueRepository } from '../../../adapters/repositories/invoice/client-issues/IInvoiceClientIssueRepository';
 import type { IStockBueTlqvCacheRepository } from '../../../adapters/repositories/cache/stock-bue/IStockBueTlqvCacheRepository';
 import type { IMadreXubioComprobantesRepository } from '../../../adapters/repositories/madre-api/xubio/comprobantes/IMadreXubioComprobantesRepository';
+import type { IGetStockBueItemByTlqvCodeRepository } from '../../../adapters/repositories/spreadsheet-api/stock-bue/IGetStockBueItemByTlqvCodeRepository';
 import type { IGetTlqvOrderDetailsRepository } from '../../../adapters/repositories/tlqv/order-details/IGetTlqvOrderDetailsRepository';
 import type { IGetTusFacturasAfipInfoRepository } from '../../../adapters/repositories/tus-facturas/afip-info/IGetTusFacturasAfipInfoRepository';
 import type { ICreateXubioClienteRepository } from '../../../adapters/repositories/xubio/clientes/ICreateXubioClienteRepository';
@@ -95,6 +96,7 @@ export class CreateXubioClienteFromTlqvInteractor {
     private readonly invoiceClientIssueRepository?: IInvoiceClientIssueRepository,
     private readonly getNow: () => Date = () => new Date(),
     private readonly findXubioClienteRepository?: IFindXubioClienteRepository,
+    private readonly stockBueItemByTlqvCodeRepository?: IGetStockBueItemByTlqvCodeRepository,
   ) {}
 
   async execute(
@@ -103,6 +105,7 @@ export class CreateXubioClienteFromTlqvInteractor {
     const prepareInteractor = new PrepareTlqvInvoiceInteractor(
       this.stockBueTlqvCacheRepository,
       this.madreXubioComprobantesRepository,
+      this.stockBueItemByTlqvCodeRepository,
     );
     const prepare = await prepareInteractor.execute(command);
 
@@ -606,13 +609,29 @@ export class CreateXubioClienteFromTlqvInteractor {
       documentoTipo: command.invalidDocument.documentoTipo,
       documentoNro: command.invalidDocument.documentoNro,
       documentoNroDigits: command.invalidDocument.documentoNroDigits,
-      message: command.invalidDocument.message,
-      messages: command.invalidDocument.messages,
+      message: buildInvalidFiscalDocumentIssueMessage(
+        command.tlqvCode,
+        command.invalidDocument,
+      ),
+      messages: [
+        buildInvalidFiscalDocumentIssueMessage(
+          command.tlqvCode,
+          command.invalidDocument,
+        ),
+        ...command.invalidDocument.messages,
+      ],
       rawPayload: command.invalidDocument.rawPayload,
       metadata: command.issueContext.metadata,
       now: this.getNow(),
     });
   }
+}
+
+function buildInvalidFiscalDocumentIssueMessage(
+  tlqvCode: string,
+  invalidDocument: TusFacturasAfipInfoInvalidDocument,
+): string {
+  return `${tlqvCode} trae documento fiscal "${invalidDocument.documentoNro}" (${invalidDocument.documentoNroDigits.length} dígitos). No se puede consultar TusFacturas ni derivar un DNI/CUIT válido automáticamente. Hay que corregir el documento o cargarlo manualmente como consumidor final.`;
 }
 
 function buildExistingClienteResponse(command: {

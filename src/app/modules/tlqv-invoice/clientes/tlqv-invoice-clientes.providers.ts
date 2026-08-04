@@ -2,6 +2,7 @@ import type { Provider } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GetFlokzuTlqvOrderDetailsRepository } from '../../../../core/driver/repository/flokzu/order-details/GetTlqvOrderDetailsRepository';
 import { GetOpsApiTlqvOrderDetailsRepository } from '../../../../core/driver/repository/ops-api/order-details/GetTlqvOrderDetailsRepository';
+import { GetStockBueItemByTlqvCodeRepository } from '../../../../core/driver/repository/spreadsheet-api/stock-bue/GetStockBueItemByTlqvCodeRepository';
 import { GetTusFacturasAfipInfoRepository } from '../../../../core/driver/repository/tus-facturas/afip-info/GetTusFacturasAfipInfoRepository';
 import { CreateXubioConsumidorFinalClienteFromIssueInteractor } from '../../../../core/interactors/tlqv-invoice/clientes/CreateXubioConsumidorFinalClienteFromIssueInteractor';
 import { CreateXubioClienteFromTlqvInteractor } from '../../../../core/interactors/tlqv-invoice/clientes/CreateXubioClienteFromTlqvInteractor';
@@ -66,6 +67,17 @@ export const tlqvInvoiceClientesInteractorProviders: Provider[] = [
         createMadreInvoiceClientIssuesRepository(configService),
         () => new Date(),
         createXubioFindClienteRepository(configService),
+        new GetStockBueItemByTlqvCodeRepository({
+          baseUrl: readOptionalConfig(
+            configService,
+            'SPREADSHEET_API_BASE_URL',
+          ),
+          timeoutInMilliseconds: readNumberConfig(
+            configService,
+            'SPREADSHEET_API_TIMEOUT_MS',
+            10_000,
+          ),
+        }),
       ),
   },
   {

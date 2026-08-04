@@ -52,3 +52,20 @@ export interface GetAllStockBueItemsResponse {
   totalPages: number;
   rows: StockBueItem[];
 }
+
+export interface GetStockBueItemByTlqvCodeCommand {
+  tlqvCode: string;
+}
+
+export type GetStockBueItemByTlqvCodeResponse =
+  | {
+      found: true;
+      tlqvCode: string;
+      item: StockBueItem;
+    }
+  | {
+      found: false;
+      tlqvCode: string;
+      reason: 'not_found';
+      rawPayload?: unknown;
+    };

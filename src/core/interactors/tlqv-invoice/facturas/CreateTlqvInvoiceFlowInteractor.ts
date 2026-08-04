@@ -1,6 +1,11 @@
 import type { IGetMadreItemByTlqvCodeRepository } from '../../../adapters/repositories/spreadsheet-api/madre/IGetMadreItemByTlqvCodeRepository';
+import type { IGetStockBueItemByTlqvCodeRepository } from '../../../adapters/repositories/spreadsheet-api/stock-bue/IGetStockBueItemByTlqvCodeRepository';
 import type { IGetTlqvItemByCodeRepository } from '../../../adapters/repositories/spreadsheet-api/tlqv/IGetTlqvItemByCodeRepository';
 import type { GetMadreItemByTlqvCodeResponse } from '../../../entities/spreadsheet-api/madre/MadreItems';
+import {
+  STOCK_BUE_DISPATCHED_INSTRUCTION,
+  type GetStockBueItemByTlqvCodeResponse,
+} from '../../../entities/spreadsheet-api/stock-bue/StockBueItems';
 import type { GetTlqvItemByCodeResponse } from '../../../entities/spreadsheet-api/tlqv/TlqvItems';
 import type {
   CreateXubioInvoiceCommand,
@@ -54,6 +59,7 @@ export interface TlqvInvoiceFlowStep {
 export interface TlqvInvoiceFlowSourceData {
   tlqvSheet: GetTlqvItemByCodeResponse;
   madreSheet: GetMadreItemByTlqvCodeResponse;
+  stockBueSheet?: GetStockBueItemByTlqvCodeResponse;
 }
 
 interface CreateTlqvInvoiceFlowBaseResponse {
@@ -104,6 +110,7 @@ export class CreateTlqvInvoiceFlowInteractor {
     private readonly getTodayIsoDate: () => string = () =>
       new Date().toISOString().slice(0, 10),
     private readonly fallbackTlqvSheetRepository?: IGetTlqvItemByCodeRepository,
+    private readonly stockBueItemByTlqvCodeRepository?: IGetStockBueItemByTlqvCodeRepository,
   ) {}
 
   async execute(
@@ -434,7 +441,12 @@ export class CreateTlqvInvoiceFlowInteractor {
         this.getTlqvSheetWithFallback(tlqvCode),
         this.madreSheetRepository.getByTlqvCode({ tlqvCode }),
       ]);
-      sourceData = { tlqvSheet, madreSheet };
+      const stockBueSheet =
+        tlqvSheet.found || this.stockBueItemByTlqvCodeRepository === undefined
+          ? undefined
+          : await this.getStockBueItemByTlqvCode(tlqvCode);
+
+      sourceData = { tlqvSheet, madreSheet, stockBueSheet };
     } catch (error: unknown) {
       const blocker = {
         code: 'SPREADSHEET_SOURCE_DATA_UNAVAILABLE',
@@ -457,7 +469,10 @@ export class CreateTlqvInvoiceFlowInteractor {
     if (!sourceData.tlqvSheet.found) {
       blockers.push({
         code: 'TLQV_SHEET_ITEM_NOT_FOUND',
-        message: `${tlqvCode} no existe en la solapa TLQV de prueba-lectura.`,
+        message: buildTlqvSheetMissingMessage(
+          tlqvCode,
+          sourceData.stockBueSheet,
+        ),
         step: 'source_data',
       });
     }
@@ -512,6 +527,54 @@ export class CreateTlqvInvoiceFlowInteractor {
 
     return fallbackTlqvSheet.found ? fallbackTlqvSheet : tlqvSheet;
   }
+
+  private async getStockBueItemByTlqvCode(
+    tlqvCode: string,
+  ): Promise<GetStockBueItemByTlqvCodeResponse | undefined> {
+    if (this.stockBueItemByTlqvCodeRepository === undefined) {
+      return undefined;
+    }
+
+    try {
+      return await this.stockBueItemByTlqvCodeRepository.getByTlqvCode({
+        tlqvCode,
+      });
+    } catch (_error: unknown) {
+      return undefined;
+    }
+  }
+}
+
+function buildTlqvSheetMissingMessage(
+  tlqvCode: string,
+  stockBueSheet: GetStockBueItemByTlqvCodeResponse | undefined,
+): string {
+  const baseMessage = `${tlqvCode} no existe en la solapa financiera TLQV de prueba-lectura. Esa solapa es necesaria para calcular importes de factura.`;
+
+  if (stockBueSheet === undefined) {
+    return `${baseMessage} También se intentó validar stock-bue directo, pero no hubo respuesta usable.`;
+  }
+
+  if (!stockBueSheet.found) {
+    return `${baseMessage} También se validó stock-bue directo y no se encontró la orden.`;
+  }
+
+  const instruction = normalizeOptionalString(
+    stockBueSheet.item.data.Instruccion,
+  );
+  const saleNumber = normalizeOptionalString(
+    stockBueSheet.item.data['N venta'],
+  );
+  const instructionMessage =
+    instruction === null
+      ? 'sin Instruccion'
+      : `con Instruccion "${instruction}"`;
+  const dispatchedMessage =
+    normalizeForComparison(instruction) === STOCK_BUE_DISPATCHED_INSTRUCTION
+      ? 'La orden está despachada, pero faltan los importes financieros para facturar.'
+      : 'La orden no está marcada como DESPACHADA, por lo que no debería facturarse todavía.';
+
+  return `${baseMessage} En stock-bue sí existe en row ${stockBueSheet.item.rowNumber}${saleNumber === null ? '' : `, venta ${saleNumber}`}, ${instructionMessage}. ${dispatchedMessage}`;
 }
 
 function buildClienteFlowBlockers(
@@ -529,7 +592,7 @@ function buildClienteFlowBlockers(
     return [
       {
         code: 'INVALID_FISCAL_DOCUMENT',
-        message: `${clienteFlow.tlqvCode} tiene un documento fiscal inválido. Se guarda como issue de cliente en Madre y se saltea la creación de factura. ${clienteFlow.invalidDocument.message}`,
+        message: `${clienteFlow.tlqvCode} trae documento fiscal "${clienteFlow.invalidDocument.documentoNro}" (${clienteFlow.invalidDocument.documentoNroDigits.length} dígitos). No se puede consultar TusFacturas ni derivar un DNI/CUIT válido automáticamente. Se guarda como issue de cliente en Madre y se saltea la creación de factura.`,
         step: 'client',
       },
     ];
@@ -677,8 +740,19 @@ function getErrorMessage(error: unknown): string {
   return 'unknown error';
 }
 
-function normalizeForComparison(value: string): string {
-  return value
+function normalizeOptionalString(
+  value: string | null | undefined,
+): string | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return normalized === '' ? null : normalized;
+}
+
+function normalizeForComparison(value: string | null | undefined): string {
+  return (value ?? '')
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/[_-]+/g, ' ')
