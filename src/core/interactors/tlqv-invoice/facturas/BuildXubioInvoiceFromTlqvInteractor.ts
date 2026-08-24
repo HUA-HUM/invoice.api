@@ -53,6 +53,14 @@ export interface XubioInvoiceItemMapping {
   sourceField: string;
   rawValue: string | number | boolean | string[] | null | undefined;
   amount: number;
+  /**
+   * Gross value before any VAT-related divisor, unrounded. Xubio adds VAT on
+   * top of `amount` for the concepts that carry a divisor (Comisiones,
+   * Fletes), so `grossAmount` is what the invoice will actually total to
+   * once Xubio reconstructs it — this is what must be compared against the
+   * sale price from costos-operaciones, not `amount`.
+   */
+  grossAmount: number;
   divisor?: number;
   multiplierField?: string;
   multiplierValue?: number;
@@ -143,10 +151,8 @@ function buildItemMappings(
       definition.multiplierField === undefined
         ? undefined
         : parseMoneyLikeNumber(tlqvData[definition.multiplierField]);
-    const amount = roundMoney(
-      (parseMoneyLikeNumber(rawValue) * (multiplierValue ?? 1)) /
-        (definition.divisor ?? 1),
-    );
+    const grossAmount = parseMoneyLikeNumber(rawValue) * (multiplierValue ?? 1);
+    const amount = roundMoney(grossAmount / (definition.divisor ?? 1));
 
     if (amount === 0) {
       return {
@@ -154,6 +160,7 @@ function buildItemMappings(
         rawValue,
         multiplierValue,
         amount,
+        grossAmount,
         skipped: true,
         skippedReason: 'zero_or_empty_amount',
       };
@@ -164,9 +171,27 @@ function buildItemMappings(
       rawValue,
       multiplierValue,
       amount,
+      grossAmount,
       skipped: false,
     };
   });
+}
+
+/**
+ * Sum of every non-skipped concept's gross (pre-divisor, unrounded) amount,
+ * rounded once at the end. This is what the invoice must total to once Xubio
+ * adds VAT back on top of the concepts we send net — comparing it against
+ * "Precio de venta" from costos-operaciones is the fiscal cross-check for
+ * whether the invoice is safe to emit.
+ */
+export function computeExpectedInvoiceTotal(
+  itemMappings: XubioInvoiceItemMapping[],
+): number {
+  const total = itemMappings
+    .filter((mapping) => !mapping.skipped)
+    .reduce((sum, mapping) => sum + mapping.grossAmount, 0);
+
+  return roundMoney(total);
 }
 
 function getInvoiceItemDefinitions(
@@ -318,7 +343,7 @@ function buildInvoiceDescription(tlqvCode: string, madreItem: MadreItem) {
   return tlqvCode;
 }
 
-function parseMoneyLikeNumber(
+export function parseMoneyLikeNumber(
   value: string | number | boolean | string[] | null | undefined,
 ): number {
   if (value === undefined || value === null || value === '') {

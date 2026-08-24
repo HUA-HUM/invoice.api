@@ -1,3 +1,4 @@
+import type { IGetCostosOperacionesByTlqvCodeRepository } from '../../../adapters/repositories/spreadsheet-api/costos-operaciones/IGetCostosOperacionesByTlqvCodeRepository';
 import type { IGetMadreItemByTlqvCodeRepository } from '../../../adapters/repositories/spreadsheet-api/madre/IGetMadreItemByTlqvCodeRepository';
 import type { IGetStockBueItemByTlqvCodeRepository } from '../../../adapters/repositories/spreadsheet-api/stock-bue/IGetStockBueItemByTlqvCodeRepository';
 import type { IGetTlqvItemByCodeRepository } from '../../../adapters/repositories/spreadsheet-api/tlqv/IGetTlqvItemByCodeRepository';
@@ -276,6 +277,140 @@ describe('CreateTlqvInvoiceFlowInteractor', () => {
     expect(result.createdInvoice?.invoice.transaccionId).toBe(75226596);
   });
 
+  it('creates the invoice when the computed total matches costos-operaciones "Precio de venta"', async () => {
+    const dependencies = createDependencies();
+    dependencies.costosOperaciones = createCostosOperacionesRepository();
+    dependencies.costosOperaciones.getByTlqvCode.mockResolvedValue({
+      found: true,
+      tlqvCode: 'TLQV-1569',
+      item: {
+        rowNumber: 1,
+        data: { OPERACIÓN: 'TLQV-1569', 'Precio de venta': '$779,041.80' },
+      },
+    });
+    const interactor = createInteractor(dependencies);
+
+    const result = await interactor.execute({
+      tlqvCode: 'TLQV-1569',
+      stopAfter: 'invoice_creation',
+      dryRun: false,
+      issueDate: '2026-07-25',
+    });
+
+    expect(result.status).toBe('completed');
+    expect(dependencies.costosOperaciones.getByTlqvCode).toHaveBeenCalledWith({
+      tlqvCode: 'TLQV-1569',
+    });
+    expect(dependencies.createInvoice.create).toHaveBeenCalled();
+  });
+
+  it('blocks invoice creation when the computed total does not match costos-operaciones "Precio de venta"', async () => {
+    const dependencies = createDependencies();
+    dependencies.costosOperaciones = createCostosOperacionesRepository();
+    dependencies.costosOperaciones.getByTlqvCode.mockResolvedValue({
+      found: true,
+      tlqvCode: 'TLQV-1569',
+      item: {
+        rowNumber: 1,
+        data: { OPERACIÓN: 'TLQV-1569', 'Precio de venta': '$1,000.00' },
+      },
+    });
+    const interactor = createInteractor(dependencies);
+
+    const result = await interactor.execute({
+      tlqvCode: 'TLQV-1569',
+      stopAfter: 'invoice_creation',
+      dryRun: false,
+      issueDate: '2026-07-25',
+    });
+
+    expect(result.status).toBe('blocked');
+    if (result.status !== 'blocked') {
+      throw new Error('Expected blocked response');
+    }
+    expect(result.blockers).toEqual([
+      expect.objectContaining({
+        code: 'INVOICE_TOTAL_SALE_PRICE_MISMATCH',
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- expect.stringContaining() is typed `any` by Jest
+        message: expect.stringContaining('779041.80'),
+      }),
+    ]);
+    expect(dependencies.createInvoice.create).not.toHaveBeenCalled();
+  });
+
+  it('blocks when costos-operaciones has no row for the TLQV yet (fails closed)', async () => {
+    const dependencies = createDependencies();
+    dependencies.costosOperaciones = createCostosOperacionesRepository();
+    dependencies.costosOperaciones.getByTlqvCode.mockResolvedValue({
+      found: false,
+      tlqvCode: 'TLQV-1569',
+      reason: 'not_found',
+    });
+    const interactor = createInteractor(dependencies);
+
+    const result = await interactor.execute({
+      tlqvCode: 'TLQV-1569',
+      stopAfter: 'invoice_creation',
+      dryRun: false,
+      issueDate: '2026-07-25',
+    });
+
+    expect(result.status).toBe('blocked');
+    if (result.status !== 'blocked') {
+      throw new Error('Expected blocked response');
+    }
+    expect(result.blockers).toEqual([
+      expect.objectContaining({ code: 'COSTOS_OPERACIONES_NOT_FOUND' }),
+    ]);
+    expect(dependencies.createInvoice.create).not.toHaveBeenCalled();
+  });
+
+  it('blocks when costos-operaciones lookup fails', async () => {
+    const dependencies = createDependencies();
+    dependencies.costosOperaciones = createCostosOperacionesRepository();
+    dependencies.costosOperaciones.getByTlqvCode.mockRejectedValue(
+      new Error('timeout of 10000ms exceeded'),
+    );
+    const interactor = createInteractor(dependencies);
+
+    const result = await interactor.execute({
+      tlqvCode: 'TLQV-1569',
+      stopAfter: 'invoice_creation',
+      dryRun: false,
+      issueDate: '2026-07-25',
+    });
+
+    expect(result.status).toBe('blocked');
+    if (result.status !== 'blocked') {
+      throw new Error('Expected blocked response');
+    }
+    expect(result.blockers).toEqual([
+      expect.objectContaining({ code: 'COSTOS_OPERACIONES_LOOKUP_FAILED' }),
+    ]);
+    expect(dependencies.createInvoice.create).not.toHaveBeenCalled();
+  });
+
+  it('blocks when costos-operaciones repository is not configured', async () => {
+    const dependencies = createDependencies();
+    dependencies.costosOperaciones = undefined;
+    const interactor = createInteractor(dependencies);
+
+    const result = await interactor.execute({
+      tlqvCode: 'TLQV-1569',
+      stopAfter: 'invoice_creation',
+      dryRun: false,
+      issueDate: '2026-07-25',
+    });
+
+    expect(result.status).toBe('blocked');
+    if (result.status !== 'blocked') {
+      throw new Error('Expected blocked response');
+    }
+    expect(result.blockers).toEqual([
+      expect.objectContaining({ code: 'COSTOS_OPERACIONES_NOT_CONFIGURED' }),
+    ]);
+  });
+
   it('blocks with a clear date sequence error when Xubio rejects invoice creation by chronological numbering', async () => {
     const dependencies = createDependencies();
     dependencies.createInvoice.create.mockRejectedValue(
@@ -393,6 +528,9 @@ interface TestDependencies {
     getByTlqvCode: jest.Mock;
   };
   createInvoice: ICreateXubioInvoiceRepository & { create: jest.Mock };
+  costosOperaciones?: IGetCostosOperacionesByTlqvCodeRepository & {
+    getByTlqvCode: jest.Mock;
+  };
 }
 
 function createInteractor(
@@ -407,6 +545,7 @@ function createInteractor(
     () => '2026-07-30',
     dependencies.fallbackTlqvSheet,
     dependencies.stockBueSheet,
+    dependencies.costosOperaciones,
   );
 }
 
@@ -475,6 +614,24 @@ function createDependencies(
         xubioPayload: {} as never,
       }),
     },
+    costosOperaciones: {
+      getByTlqvCode: jest.fn().mockResolvedValue({
+        found: true,
+        tlqvCode: 'TLQV-1569',
+        item: {
+          rowNumber: 1,
+          data: { OPERACIÓN: 'TLQV-1569', 'Precio de venta': '$779,041.80' },
+        },
+      }),
+    },
+  };
+}
+
+function createCostosOperacionesRepository(): IGetCostosOperacionesByTlqvCodeRepository & {
+  getByTlqvCode: jest.Mock;
+} {
+  return {
+    getByTlqvCode: jest.fn(),
   };
 }
 

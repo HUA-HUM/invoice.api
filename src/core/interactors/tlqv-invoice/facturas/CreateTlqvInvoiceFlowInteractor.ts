@@ -1,3 +1,5 @@
+import type { IGetCostosOperacionesByTlqvCodeRepository } from '../../../adapters/repositories/spreadsheet-api/costos-operaciones/IGetCostosOperacionesByTlqvCodeRepository';
+import type { GetCostosOperacionesByTlqvCodeResponse } from '../../../entities/spreadsheet-api/costos-operaciones/CostosOperaciones';
 import type { IGetMadreItemByTlqvCodeRepository } from '../../../adapters/repositories/spreadsheet-api/madre/IGetMadreItemByTlqvCodeRepository';
 import type { IGetStockBueItemByTlqvCodeRepository } from '../../../adapters/repositories/spreadsheet-api/stock-bue/IGetStockBueItemByTlqvCodeRepository';
 import type { IGetTlqvItemByCodeRepository } from '../../../adapters/repositories/spreadsheet-api/tlqv/IGetTlqvItemByCodeRepository';
@@ -17,6 +19,8 @@ import type {
 } from '../clientes/CreateXubioClienteFromTlqvInteractor';
 import {
   BuildXubioInvoiceFromTlqvInteractor,
+  computeExpectedInvoiceTotal,
+  parseMoneyLikeNumber,
   type BuildXubioInvoiceFromTlqvResponse,
 } from './BuildXubioInvoiceFromTlqvInteractor';
 
@@ -111,6 +115,7 @@ export class CreateTlqvInvoiceFlowInteractor {
       new Date().toISOString().slice(0, 10),
     private readonly fallbackTlqvSheetRepository?: IGetTlqvItemByCodeRepository,
     private readonly stockBueItemByTlqvCodeRepository?: IGetStockBueItemByTlqvCodeRepository,
+    private readonly costosOperacionesRepository?: IGetCostosOperacionesByTlqvCodeRepository,
   ) {}
 
   async execute(
@@ -321,6 +326,30 @@ export class CreateTlqvInvoiceFlowInteractor {
       };
     }
 
+    const totalMismatchBlocker =
+      await this.validateInvoiceTotalMatchesSalePrice(tlqvCode, invoiceBuild);
+    if (totalMismatchBlocker !== null) {
+      steps.push({
+        name: 'invoice_creation',
+        status: 'blocked',
+        blockers: [totalMismatchBlocker],
+      });
+
+      return {
+        status: 'blocked',
+        canContinue: false,
+        tlqvCode,
+        stopAfter,
+        dryRun,
+        steps,
+        clienteFlow,
+        xubioClienteId,
+        sourceData: sourceDataResult.sourceData,
+        invoiceBuild,
+        blockers: [totalMismatchBlocker],
+      };
+    }
+
     if (dryRun) {
       steps.push({
         name: 'invoice_creation',
@@ -526,6 +555,73 @@ export class CreateTlqvInvoiceFlowInteractor {
     });
 
     return fallbackTlqvSheet.found ? fallbackTlqvSheet : tlqvSheet;
+  }
+
+  /**
+   * Cross-checks the invoice payload against "Precio de venta" in
+   * costos-operaciones — that field must equal exactly what the invoice ends
+   * up totalling once Xubio adds VAT back on top of the concepts we send
+   * net. Fails closed: if the repository isn't configured, the lookup
+   * fails, there's no costos-operaciones row for this TLQV yet, or the sale
+   * price can't be read, the invoice is blocked rather than emitted
+   * unverified.
+   */
+  private async validateInvoiceTotalMatchesSalePrice(
+    tlqvCode: string,
+    invoiceBuild: BuildXubioInvoiceFromTlqvResponse,
+  ): Promise<TlqvInvoiceFlowBlocker | null> {
+    if (this.costosOperacionesRepository === undefined) {
+      return {
+        code: 'COSTOS_OPERACIONES_NOT_CONFIGURED',
+        message:
+          'El repositorio de costos-operaciones no está configurado; no se puede validar el total de la factura contra "Precio de venta".',
+        step: 'invoice_creation',
+      };
+    }
+
+    let costosResponse: GetCostosOperacionesByTlqvCodeResponse;
+    try {
+      costosResponse = await this.costosOperacionesRepository.getByTlqvCode({
+        tlqvCode,
+      });
+    } catch (error: unknown) {
+      return {
+        code: 'COSTOS_OPERACIONES_LOOKUP_FAILED',
+        message: `No se pudo consultar costos-operaciones para ${tlqvCode}. ${getErrorMessage(error)}`,
+        step: 'invoice_creation',
+      };
+    }
+
+    if (!costosResponse.found) {
+      return {
+        code: 'COSTOS_OPERACIONES_NOT_FOUND',
+        message: `${tlqvCode} no existe en la solapa costos-operaciones; no se puede validar el total de la factura.`,
+        step: 'invoice_creation',
+      };
+    }
+
+    const precioVentaRaw = costosResponse.item.data['Precio de venta'];
+    const precioVenta = parseMoneyLikeNumber(precioVentaRaw);
+    if (precioVenta === 0) {
+      return {
+        code: 'COSTOS_OPERACIONES_SALE_PRICE_MISSING',
+        message: `${tlqvCode} no tiene "Precio de venta" válido en costos-operaciones; no se puede validar el total de la factura.`,
+        step: 'invoice_creation',
+      };
+    }
+
+    const expectedTotal = computeExpectedInvoiceTotal(
+      invoiceBuild.itemMappings,
+    );
+    if (Math.round(expectedTotal * 100) === Math.round(precioVenta * 100)) {
+      return null;
+    }
+
+    return {
+      code: 'INVOICE_TOTAL_SALE_PRICE_MISMATCH',
+      message: `El total calculado de la factura (${expectedTotal.toFixed(2)}) no coincide con "Precio de venta" en costos-operaciones (${precioVenta.toFixed(2)}) para ${tlqvCode}.`,
+      step: 'invoice_creation',
+    };
   }
 
   private async getStockBueItemByTlqvCode(

@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'node:crypto';
-import { Job, Queue, Worker, type JobsOptions } from 'bullmq';
+import { Job, Queue, Worker, type JobsOptions, type JobType } from 'bullmq';
 import type {
   CreateTlqvInvoiceFlowCommand,
   CreateTlqvInvoiceFlowResponse,
@@ -74,6 +74,39 @@ export interface EnqueueTlqvInvoiceFacturasBulkResponse {
     jobId: string;
     tlqvCode: string;
   }>;
+}
+
+export type TlqvInvoiceFacturaBulkJobState =
+  'completed' | 'failed' | 'active' | 'waiting' | 'delayed' | 'paused';
+
+export interface TlqvInvoiceFacturaBulkBatchJobStatus {
+  jobId: string;
+  tlqvCode: string;
+  state: TlqvInvoiceFacturaBulkJobState;
+  attemptsMade: number;
+  status?: CreateTlqvInvoiceFlowResponse['status'];
+  created?: boolean;
+  skipped?: boolean;
+  blockerCodes?: string[];
+  transaccionId?: number | null;
+  numeroDocumento?: string | null;
+  failedReason?: string;
+}
+
+export interface TlqvInvoiceFacturasBulkBatchStatusResponse {
+  batchId: string;
+  queueName: string;
+  found: boolean;
+  totalJobs: number;
+  counts: Record<TlqvInvoiceFacturaBulkJobState, number>;
+  results: {
+    created: number;
+    skipped: number;
+    blocked: number;
+    failed: number;
+    pending: number;
+  };
+  jobs: TlqvInvoiceFacturaBulkBatchJobStatus[];
 }
 
 @Injectable()
@@ -203,6 +236,69 @@ export class TlqvInvoiceFacturasBulkQueueService implements OnModuleDestroy {
   async onModuleDestroy(): Promise<void> {
     await this.worker.close();
     await this.queue.close();
+  }
+
+  async getBatchStatus(
+    batchId: string,
+  ): Promise<TlqvInvoiceFacturasBulkBatchStatusResponse> {
+    const states: TlqvInvoiceFacturaBulkJobState[] = [
+      'completed',
+      'failed',
+      'active',
+      'waiting',
+      'delayed',
+      'paused',
+    ];
+    const scanLimit = this.readBatchScanLimit();
+
+    const jobsByState = await Promise.all(
+      states.map((state) =>
+        this.queue.getJobs(state as JobType, 0, scanLimit - 1),
+      ),
+    );
+
+    const counts = states.reduce(
+      (accumulator, state) => ({ ...accumulator, [state]: 0 }),
+      {} as Record<TlqvInvoiceFacturaBulkJobState, number>,
+    );
+    const jobs: TlqvInvoiceFacturaBulkBatchJobStatus[] = [];
+
+    for (let index = 0; index < states.length; index += 1) {
+      const state = states[index];
+      const matchingJobs = jobsByState[index].filter(
+        (job) => job.data.batchId === batchId,
+      );
+      counts[state] = matchingJobs.length;
+
+      for (const job of matchingJobs) {
+        const result = job.returnvalue as
+          TlqvInvoiceFacturaBulkJobResult | undefined;
+
+        jobs.push({
+          jobId: String(job.id),
+          tlqvCode: job.data.tlqvCode,
+          state,
+          attemptsMade: job.attemptsMade,
+          status: result?.status,
+          created: result?.created,
+          skipped: result?.skipped,
+          blockerCodes: result?.blockerCodes,
+          transaccionId: result?.transaccionId,
+          numeroDocumento: result?.numeroDocumento,
+          failedReason: job.failedReason,
+        });
+      }
+    }
+
+    return {
+      batchId,
+      queueName: TLQV_INVOICE_FACTURAS_BULK_QUEUE_NAME,
+      found: jobs.length > 0,
+      totalJobs: jobs.length,
+      counts,
+      results: summarizeBatchResults(jobs),
+      jobs,
+    };
   }
 
   private async processCreateInvoiceJob(
@@ -480,6 +576,13 @@ export class TlqvInvoiceFacturasBulkQueueService implements OnModuleDestroy {
 
     return value;
   }
+
+  private readBatchScanLimit(): number {
+    return this.readPositiveIntegerConfig(
+      'TLQV_INVOICE_FACTURAS_BULK_QUEUE_BATCH_SCAN_LIMIT',
+      5_000,
+    );
+  }
 }
 
 function normalizeUniqueTlqvCodes(tlqvCodes: string[]): {
@@ -550,6 +653,34 @@ function buildJobResult(
     numeroDocumento,
     response,
   };
+}
+
+function summarizeBatchResults(
+  jobs: TlqvInvoiceFacturaBulkBatchJobStatus[],
+): TlqvInvoiceFacturasBulkBatchStatusResponse['results'] {
+  const results = {
+    created: 0,
+    skipped: 0,
+    blocked: 0,
+    failed: 0,
+    pending: 0,
+  };
+
+  for (const job of jobs) {
+    if (job.state === 'failed') {
+      results.failed += 1;
+    } else if (job.status === 'blocked') {
+      results.blocked += 1;
+    } else if (job.created) {
+      results.created += 1;
+    } else if (job.skipped) {
+      results.skipped += 1;
+    } else {
+      results.pending += 1;
+    }
+  }
+
+  return results;
 }
 
 function getBlockerCodes(response: CreateTlqvInvoiceFlowResponse): string[] {

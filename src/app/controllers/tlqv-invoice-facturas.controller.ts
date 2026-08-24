@@ -3,11 +3,18 @@ import {
   Body,
   Controller,
   Delete,
+  Get,
   Param,
   Post,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBody, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBody,
+  ApiOkResponse,
+  ApiOperation,
+  ApiParam,
+  ApiTags,
+} from '@nestjs/swagger';
 import {
   TLQV_INVOICE_FLOW_STOP_AFTER_VALUES,
   type TlqvInvoiceFlowStopAfter,
@@ -207,6 +214,63 @@ export class TlqvInvoiceFacturasController {
       dryRun: readOptionalBoolean(body.dryRun, 'dryRun'),
       issueDate: readOptionalIssueDate(body.issueDate, body.fechaFactura),
     });
+  }
+
+  @ApiInternalEndpoint()
+  @ApiOperation({
+    summary: 'Consultar estado de un batch bulk',
+    description:
+      'Cuenta los jobs BullMQ del batch por estado (completed/failed/active/waiting/delayed/paused) y resume el resultado de cada TLQV (creado, bloqueado, saltado). Pensado para pollear desde un panel mientras se procesa un bulk/create-from-tlqv.',
+  })
+  @ApiParam({
+    name: 'batchId',
+    example: 'tlqv-invoice-bulk-2026-08-01T15-00-00-000Z-a1b2c3d4',
+  })
+  @ApiOkResponse({
+    description: 'Estado agregado del batch y detalle por TLQV.',
+    schema: {
+      example: {
+        batchId: 'tlqv-invoice-bulk-2026-08-01T15-00-00-000Z-a1b2c3d4',
+        queueName: 'tlqv-invoice-facturas-bulk',
+        found: true,
+        totalJobs: 2,
+        counts: {
+          completed: 1,
+          failed: 0,
+          active: 0,
+          waiting: 1,
+          delayed: 0,
+          paused: 0,
+        },
+        results: {
+          created: 1,
+          skipped: 0,
+          blocked: 0,
+          failed: 0,
+          pending: 1,
+        },
+        jobs: [
+          {
+            jobId:
+              'tlqv-invoice:tlqv-invoice-bulk-2026-08-01T15-00-00-000Z-a1b2c3d4:TLQV-15783',
+            tlqvCode: 'TLQV-15783',
+            state: 'completed',
+            attemptsMade: 1,
+            status: 'completed',
+            created: true,
+            skipped: false,
+            transaccionId: 76318348,
+            numeroDocumento: 'A-00008-00002667',
+          },
+        ],
+      },
+    },
+  })
+  @Get('bulk/:batchId')
+  getBulkBatchStatus(@Param('batchId') batchId: string) {
+    return this.tlqvInvoiceFacturasBulkQueueService.getBatchStatus(
+      readRequiredBodyString(batchId, 'batchId'),
+    );
   }
 
   @ApiInternalEndpoint()
