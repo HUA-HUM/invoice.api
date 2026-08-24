@@ -277,6 +277,41 @@ describe('CreateTlqvInvoiceFlowInteractor', () => {
     expect(result.createdInvoice?.invoice.transaccionId).toBe(75226596);
   });
 
+  it('blocks invoice creation when the TLQV sheet has an "Anti Dumping" value', async () => {
+    const dependencies = createDependencies();
+    dependencies.tlqvSheet.getByCode.mockResolvedValue({
+      found: true,
+      tlqvCode: 'TLQV-1569',
+      item: {
+        rowNumber: 22,
+        data: { ...createTlqvItemData(), 'Anti Dumping': '55.26' },
+      },
+    });
+    const interactor = createInteractor(dependencies);
+
+    const result = await interactor.execute({
+      tlqvCode: 'TLQV-1569',
+      stopAfter: 'invoice_creation',
+      dryRun: false,
+      issueDate: '2026-07-25',
+    });
+
+    expect(result.status).toBe('blocked');
+    if (result.status !== 'blocked') {
+      throw new Error('Expected blocked response');
+    }
+    expect(result.blockers).toEqual([
+      expect.objectContaining({
+        code: 'ANTI_DUMPING_NOT_SUPPORTED',
+        step: 'invoice_creation',
+      }),
+    ]);
+    expect(dependencies.createInvoice.create).not.toHaveBeenCalled();
+    expect(
+      dependencies.costosOperaciones?.getByTlqvCode,
+    ).not.toHaveBeenCalled();
+  });
+
   it('creates the invoice when the computed total matches costos-operaciones "Precio de venta"', async () => {
     const dependencies = createDependencies();
     dependencies.costosOperaciones = createCostosOperacionesRepository();
@@ -302,6 +337,63 @@ describe('CreateTlqvInvoiceFlowInteractor', () => {
       tlqvCode: 'TLQV-1569',
     });
     expect(dependencies.createInvoice.create).toHaveBeenCalled();
+  });
+
+  it.each(['$779,042.80', '$779,040.80'])(
+    'creates the invoice when the total is off by up to $1 from "Precio de venta" (%s)',
+    async (precioVenta) => {
+      const dependencies = createDependencies();
+      dependencies.costosOperaciones = createCostosOperacionesRepository();
+      dependencies.costosOperaciones.getByTlqvCode.mockResolvedValue({
+        found: true,
+        tlqvCode: 'TLQV-1569',
+        item: {
+          rowNumber: 1,
+          data: { OPERACIÓN: 'TLQV-1569', 'Precio de venta': precioVenta },
+        },
+      });
+      const interactor = createInteractor(dependencies);
+
+      const result = await interactor.execute({
+        tlqvCode: 'TLQV-1569',
+        stopAfter: 'invoice_creation',
+        dryRun: false,
+        issueDate: '2026-07-25',
+      });
+
+      expect(result.status).toBe('completed');
+      expect(dependencies.createInvoice.create).toHaveBeenCalled();
+    },
+  );
+
+  it('blocks invoice creation when the total is off by more than $1 from "Precio de venta"', async () => {
+    const dependencies = createDependencies();
+    dependencies.costosOperaciones = createCostosOperacionesRepository();
+    dependencies.costosOperaciones.getByTlqvCode.mockResolvedValue({
+      found: true,
+      tlqvCode: 'TLQV-1569',
+      item: {
+        rowNumber: 1,
+        data: { OPERACIÓN: 'TLQV-1569', 'Precio de venta': '$779,043.81' },
+      },
+    });
+    const interactor = createInteractor(dependencies);
+
+    const result = await interactor.execute({
+      tlqvCode: 'TLQV-1569',
+      stopAfter: 'invoice_creation',
+      dryRun: false,
+      issueDate: '2026-07-25',
+    });
+
+    expect(result.status).toBe('blocked');
+    if (result.status !== 'blocked') {
+      throw new Error('Expected blocked response');
+    }
+    expect(result.blockers).toEqual([
+      expect.objectContaining({ code: 'INVOICE_TOTAL_SALE_PRICE_MISMATCH' }),
+    ]);
+    expect(dependencies.createInvoice.create).not.toHaveBeenCalled();
   });
 
   it('blocks invoice creation when the computed total does not match costos-operaciones "Precio de venta"', async () => {

@@ -24,6 +24,8 @@ import {
   type BuildXubioInvoiceFromTlqvResponse,
 } from './BuildXubioInvoiceFromTlqvInteractor';
 
+const INVOICE_TOTAL_TOLERANCE_IN_CENTS = 100;
+
 export const TLQV_INVOICE_FLOW_STOP_AFTER_VALUES = [
   'client',
   'source_data',
@@ -268,6 +270,33 @@ export class CreateTlqvInvoiceFlowInteractor {
         code: 'SOURCE_DATA_NOT_AVAILABLE',
         message:
           'No están disponibles las dos solapas necesarias para armar la factura.',
+        step: 'invoice_creation' as const,
+      };
+      steps.push({
+        name: 'invoice_creation',
+        status: 'blocked',
+        blockers: [blocker],
+      });
+
+      return {
+        status: 'blocked',
+        canContinue: false,
+        tlqvCode,
+        stopAfter,
+        dryRun,
+        steps,
+        clienteFlow,
+        xubioClienteId,
+        sourceData,
+        blockers: [blocker],
+      };
+    }
+
+    const antiDumpingRaw = sourceData.tlqvSheet.item.data['Anti Dumping'];
+    if (parseMoneyLikeNumber(antiDumpingRaw) !== 0) {
+      const blocker = {
+        code: 'ANTI_DUMPING_NOT_SUPPORTED',
+        message: `${tlqvCode} trae "Anti Dumping" = ${String(antiDumpingRaw)} en la solapa TLQV, y todavía no sabemos con qué concepto/productId de Xubio corresponde ese importe. Se bloquea para revisión manual.`,
         step: 'invoice_creation' as const,
       };
       steps.push({
@@ -559,12 +588,13 @@ export class CreateTlqvInvoiceFlowInteractor {
 
   /**
    * Cross-checks the invoice payload against "Precio de venta" in
-   * costos-operaciones — that field must equal exactly what the invoice ends
-   * up totalling once Xubio adds VAT back on top of the concepts we send
-   * net. Fails closed: if the repository isn't configured, the lookup
-   * fails, there's no costos-operaciones row for this TLQV yet, or the sale
-   * price can't be read, the invoice is blocked rather than emitted
-   * unverified.
+   * costos-operaciones — that field should equal what the invoice ends up
+   * totalling once Xubio adds VAT back on top of the concepts we send net,
+   * within INVOICE_TOTAL_TOLERANCE_IN_CENTS (rounding differences between
+   * sheets have been off by up to $1 in practice). Fails closed: if the
+   * repository isn't configured, the lookup fails, there's no
+   * costos-operaciones row for this TLQV yet, or the sale price can't be
+   * read, the invoice is blocked rather than emitted unverified.
    */
   private async validateInvoiceTotalMatchesSalePrice(
     tlqvCode: string,
@@ -613,13 +643,16 @@ export class CreateTlqvInvoiceFlowInteractor {
     const expectedTotal = computeExpectedInvoiceTotal(
       invoiceBuild.itemMappings,
     );
-    if (Math.round(expectedTotal * 100) === Math.round(precioVenta * 100)) {
+    const differenceInCents = Math.abs(
+      Math.round(expectedTotal * 100) - Math.round(precioVenta * 100),
+    );
+    if (differenceInCents <= INVOICE_TOTAL_TOLERANCE_IN_CENTS) {
       return null;
     }
 
     return {
       code: 'INVOICE_TOTAL_SALE_PRICE_MISMATCH',
-      message: `El total calculado de la factura (${expectedTotal.toFixed(2)}) no coincide con "Precio de venta" en costos-operaciones (${precioVenta.toFixed(2)}) para ${tlqvCode}.`,
+      message: `El total calculado de la factura (${expectedTotal.toFixed(2)}) no coincide con "Precio de venta" en costos-operaciones (${precioVenta.toFixed(2)}) para ${tlqvCode}. Diferencia: ${(differenceInCents / 100).toFixed(2)} (tolerancia: ${(INVOICE_TOTAL_TOLERANCE_IN_CENTS / 100).toFixed(2)}).`,
       step: 'invoice_creation',
     };
   }
