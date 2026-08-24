@@ -1,5 +1,4 @@
 import type { IInvoiceClientIssueRepository } from '../../../adapters/repositories/invoice/client-issues/IInvoiceClientIssueRepository';
-import type { IStockBueTlqvCacheRepository } from '../../../adapters/repositories/cache/stock-bue/IStockBueTlqvCacheRepository';
 import type { IMadreXubioComprobantesRepository } from '../../../adapters/repositories/madre-api/xubio/comprobantes/IMadreXubioComprobantesRepository';
 import type { IGetTlqvOrderDetailsRepository } from '../../../adapters/repositories/tlqv/order-details/IGetTlqvOrderDetailsRepository';
 import type { IGetTusFacturasAfipInfoRepository } from '../../../adapters/repositories/tus-facturas/afip-info/IGetTusFacturasAfipInfoRepository';
@@ -40,15 +39,6 @@ describe('CreateXubioClienteFromTlqvInteractor', () => {
             tlqvCode: 'TLQV-14921',
             saleNumber: '200001111',
             source: 'ops_api',
-          },
-          stockBue: {
-            rowNumber: 10,
-            instruction: 'DESPACHADA',
-            description: 'Producto test',
-            fechaRecepcion: undefined,
-            fechaSalida: undefined,
-            fechaLimite: undefined,
-            fechaInstruccion: undefined,
           },
           buyerData: {
             nombreDestinatario: 'Tania Silvia Coronel Alferrano',
@@ -116,7 +106,83 @@ describe('CreateXubioClienteFromTlqvInteractor', () => {
     if (result.status !== 'created') {
       throw new Error('Expected created response');
     }
-    expect(result.orderDetails.source).toBe('flokzu');
+    expect(result.orderDetails?.source).toBe('flokzu');
+  });
+
+  it.each(['ENTREGADO', 'RECIBIDO_BUENOS_AIRES', 'ETIQUETA_IMPRESA'])(
+    'allows other invoiceable order statuses from Ops API (%s)',
+    async (estadoVbi) => {
+      const repositories = createRepositories();
+      repositories.opsOrderDetails.getByTlqvCode.mockResolvedValue({
+        found: true,
+        orderDetails: createOrderDetails({}, { estadoVbi }),
+      });
+      const interactor = createInteractor(repositories);
+
+      const result = await interactor.execute({ tlqvCode: 'TLQV-14921' });
+
+      expect(result.status).toBe('created');
+    },
+  );
+
+  it('blocks when the Ops API order status is not invoiceable', async () => {
+    const repositories = createRepositories();
+    repositories.opsOrderDetails.getByTlqvCode.mockResolvedValue({
+      found: true,
+      orderDetails: createOrderDetails({}, { estadoVbi: 'EN_TRANSITO' }),
+    });
+    const interactor = createInteractor(repositories);
+
+    const result = await interactor.execute({ tlqvCode: 'TLQV-14921' });
+
+    expect(result.status).toBe('blocked');
+    expect(result.canContinue).toBe(false);
+    if (result.status !== 'blocked') {
+      throw new Error('Expected blocked response');
+    }
+    expect(result.blockers).toEqual([
+      {
+        code: 'ORDER_STATUS_NOT_INVOICEABLE',
+        message:
+          'TLQV-14921 has order status "EN_TRANSITO" in Ops API; it must be one of: DESPACHADA_BUENOS_AIRES, ENTREGADO, RECIBIDO_BUENOS_AIRES, ETIQUETA_IMPRESA.',
+      },
+    ]);
+    expect(repositories.tusFacturas.getAfipInfo).not.toHaveBeenCalled();
+    expect(repositories.xubioClientes.create).not.toHaveBeenCalled();
+  });
+
+  it('blocks when the Ops API order status is missing', async () => {
+    const repositories = createRepositories();
+    repositories.opsOrderDetails.getByTlqvCode.mockResolvedValue({
+      found: true,
+      orderDetails: createOrderDetails({}, { estadoVbi: null }),
+    });
+    const interactor = createInteractor(repositories);
+
+    const result = await interactor.execute({ tlqvCode: 'TLQV-14921' });
+
+    expect(result.status).toBe('blocked');
+    if (result.status !== 'blocked') {
+      throw new Error('Expected blocked response');
+    }
+    expect(result.blockers).toEqual([
+      expect.objectContaining({ code: 'ORDER_STATUS_NOT_INVOICEABLE' }),
+    ]);
+  });
+
+  it('does not validate order status when order details come from Flokzu', async () => {
+    const repositories = createRepositories();
+    repositories.opsOrderDetails.getByTlqvCode.mockResolvedValue({
+      found: false,
+      tlqvCode: 'TLQV-14921',
+      source: 'ops_api',
+      reason: 'not_found',
+    });
+    const interactor = createInteractor(repositories);
+
+    const result = await interactor.execute({ tlqvCode: 'TLQV-14921' });
+
+    expect(result.status).toBe('created');
   });
 
   it('uses an existing Xubio cliente before calling TusFacturas or create', async () => {
@@ -431,6 +497,7 @@ describe('CreateXubioClienteFromTlqvInteractor', () => {
     expect(result.fiscalInfo.documentoNroDigits).toBe('22395581');
     expect(repositories.xubioClientes.create).toHaveBeenCalledWith(
       expect.objectContaining({
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- expect.objectContaining() is typed `any` by Jest
         cliente: expect.objectContaining({
           identificacionTributaria: {
             codigo: 'DNI',
@@ -477,6 +544,7 @@ describe('CreateXubioClienteFromTlqvInteractor', () => {
     expect(result.fiscalInfo.documentoNroDigits).toBe('18771957');
     expect(repositories.xubioClientes.create).toHaveBeenCalledWith(
       expect.objectContaining({
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- expect.objectContaining() is typed `any` by Jest
         cliente: expect.objectContaining({
           identificacionTributaria: {
             codigo: 'DNI',
@@ -566,7 +634,6 @@ describe('CreateXubioClienteFromTlqvInteractor', () => {
 
 function createInteractor(repositories: ReturnType<typeof createRepositories>) {
   return new CreateXubioClienteFromTlqvInteractor(
-    repositories.cache,
     repositories.madre,
     [repositories.opsOrderDetails, repositories.flokzuOrderDetails],
     repositories.tusFacturas,
@@ -578,10 +645,10 @@ function createInteractor(repositories: ReturnType<typeof createRepositories>) {
 }
 
 function createRepositories(): {
-  cache: IStockBueTlqvCacheRepository & { getByTlqvCode: jest.Mock };
   madre: IMadreXubioComprobantesRepository & {
     findByTlqvCodes: jest.Mock;
     findByTlqvCode: jest.Mock;
+    findFullByTlqvCode: jest.Mock;
     existsByTlqvCode: jest.Mock;
   };
   opsOrderDetails: IGetTlqvOrderDetailsRepository & {
@@ -600,20 +667,13 @@ function createRepositories(): {
   issues: IInvoiceClientIssueRepository & { upsert: jest.Mock };
 } {
   return {
-    cache: {
-      replaceAll: jest.fn(),
-      getSnapshot: jest.fn(),
-      getByTlqvCode: jest.fn().mockResolvedValue({
-        metadata: createCacheMetadata(),
-        item: createCacheItem('TLQV-14921', 'DESPACHADA'),
-      }),
-    },
     madre: {
       createSyncRun: jest.fn(),
       updateSyncRun: jest.fn(),
       upsertBatch: jest.fn(),
       findByTlqvCodes: jest.fn(),
       findByTlqvCode: jest.fn(),
+      findFullByTlqvCode: jest.fn(),
       existsByTlqvCode: jest.fn().mockResolvedValue({
         tlqvCode: 'TLQV-14921',
         exists: false,
@@ -681,6 +741,9 @@ function createOrderDetails(
     cuitComprador: string | null;
     cuitCompradorDigits: string | null;
   }> = {},
+  overrides: {
+    estadoVbi?: string | null;
+  } = {},
 ) {
   const source = buyerOverrides.source ?? 'ops_api';
   const buyerData: TlqvOrderBuyerData = {
@@ -704,39 +767,12 @@ function createOrderDetails(
     source,
     saleNumber: '200001111',
     buyerData,
+    statuses: {
+      estadoVbi:
+        overrides.estadoVbi === undefined
+          ? 'DESPACHADA_BUENOS_AIRES'
+          : overrides.estadoVbi,
+    },
     rawPayload: {},
-  };
-}
-
-function createCacheItem(tlqvCode: string, instruction: string) {
-  return {
-    tlqvCode,
-    rowNumber: 10,
-    instruction,
-    saleNumber: '200001111',
-    description: 'Producto test',
-    rawData: {
-      TLQV: tlqvCode,
-      Instruccion: instruction,
-      'N venta': '200001111',
-      Descripción: 'Producto test',
-    },
-  };
-}
-
-function createCacheMetadata() {
-  return {
-    refreshedAt: '2026-07-07T12:00:00.000Z',
-    totalSheetRows: 10,
-    totalRowsWithTlqv: 10,
-    totalRowsWithoutTlqv: 0,
-    totalUniqueTlqv: 10,
-    totalDispatchedRows: 8,
-    totalDispatchedRowsWithTlqv: 8,
-    totalDispatchedRowsWithoutTlqv: 0,
-    totalUniqueDispatchedTlqv: 8,
-    instructionCounts: {
-      DESPACHADA: 8,
-    },
   };
 }

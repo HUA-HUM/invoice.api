@@ -133,6 +133,7 @@ describe('CreateXubioConsumidorFinalClienteFromIssueInteractor', () => {
     expect(result.usrCode).toBe('TLQV-2722395581');
     expect(repositories.xubioClientes.create).toHaveBeenCalledWith(
       expect.objectContaining({
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- expect.objectContaining() is typed `any` by Jest
         cliente: expect.objectContaining({
           cuit: '22.395.581',
           CUIT: '22.395.581',

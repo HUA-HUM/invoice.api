@@ -1,0 +1,2009 @@
+CONTEXTO INTEGRAL DE INVOICE.API
+================================
+
+Fecha del relevamiento: 18 de agosto de 2026
+Repositorio: invoice.api
+Rama: main
+Commit relevado: 3fc37e5, del 4 de agosto de 2026
+Estado del repositorio al realizar el relevamiento: sin cambios locales pendientes.
+
+Verificación realizada:
+
+- El proyecto compila correctamente con NestJS.
+- 29 suites unitarias aprobadas.
+- 179 pruebas aprobadas.
+- 0 pruebas fallidas.
+- 0 snapshots.
+- No se ejecutaron los tests e2e; el e2e existente sigue siendo esencialmente el generado por NestJS.
+
+
+1. OBJETIVO ACTUAL
+==================
+
+invoice.api es un microservicio interno que automatiza el proceso de facturación de órdenes TLQV en Xubio.
+
+Su responsabilidad principal es responder:
+
+“¿Este TLQV está listo para facturarse y, si lo está, qué cliente, letra, conceptos, importes y fecha debemos enviar a Xubio?”
+
+Para decidirlo, cruza varias fuentes:
+
+1. Stock BUE: estado operativo y condición DESPACHADA.
+2. Madre API: comprobantes ya importados desde Xubio e incidencias.
+3. Ops API: datos actuales de la orden y del comprador.
+4. Flokzu: fallback de datos de comprador cuando Ops API no encuentra el TLQV.
+5. TusFacturas / AFIP / ARCA: razón social y condición impositiva.
+6. Spreadsheet API, solapa TLQV: importes financieros y aduaneros.
+7. Spreadsheet API, solapa MADRE: comisión y costo de envío.
+8. Xubio: búsqueda/creación del cliente y emisión de la factura.
+
+Flujo resumido:
+
+Código TLQV
+  -> Stock BUE: ¿existe y está DESPACHADA?
+  -> Madre: ¿ya está facturado?
+  -> Ops API: buscar datos del comprador
+       -> si no está, fallback a Flokzu
+  -> Xubio: buscar cliente existente
+       -> si no existe, TusFacturas/AFIP + creación del cliente
+  -> Spreadsheet TLQV + Spreadsheet MADRE: obtener importes
+  -> Resolver letra A/B
+  -> Construir payload
+  -> dryRun o emisión real en Xubio
+  -> Registrar bloqueos/incidencias en Madre cuando corresponda
+
+El flujo no debe emitir una factura si no puede verificar de manera segura:
+
+- Que la orden está despachada.
+- Que no está facturada.
+- Que existe información suficiente del comprador.
+- Que puede encontrarse o crearse el cliente Xubio.
+- Que existe el ID del cliente Xubio.
+- Que existen los importes financieros en TLQV y MADRE.
+- Que la fecha de emisión es válida.
+- Que existe al menos un concepto con importe distinto de cero.
+
+Orquestador principal:
+src/core/interactors/tlqv-invoice/facturas/CreateTlqvInvoiceFlowInteractor.ts
+
+
+2. EVOLUCIÓN DE LO QUE SE HIZO
+==============================
+
+La evolución funcional reconstruida desde Git fue aproximadamente esta:
+
+1. Se creó la estructura NestJS y los drivers de integración.
+2. Se implementó la extracción histórica de comprobantes de Xubio y su persistencia en Madre.
+3. Se agregó el cruce Stock BUE contra comprobantes para detectar TLQV despachados no facturados.
+4. Se agregó la validación previa de un TLQV.
+5. Se incorporaron Ops API y Flokzu para obtener datos del comprador.
+6. Se agregó TusFacturas como fuente fiscal AFIP/ARCA.
+7. Se implementó la creación de clientes Xubio y el registro de incidencias.
+8. Existió un flujo de generación de documentos PDF y almacenamiento CDN/DigitalOcean Spaces.
+9. El 31 de julio se retiró ese flujo documental y se reemplazó por la creación real de facturas en Xubio.
+10. Se incorporó la búsqueda de clientes existentes antes de intentar crearlos.
+11. Se permitió una fecha de factura configurable, con tolerancia de hasta diez días hacia atrás.
+12. Se agregó facturación bulk con BullMQ.
+13. Se agregaron fallbacks para documentos fiscales imperfectos, consumidores finales y búsquedas directas en Stock BUE/planillas.
+
+El flujo PDF/CDN ya no está en el código actual. Los commits históricos siguen existiendo, pero hoy la API está orientada a emitir comprobantes reales en Xubio.
+
+
+3. FUENTES DE DATOS
+===================
+
+3.1. Stock BUE mediante Spreadsheet API
+---------------------------------------
+
+Es la fuente operativa para saber:
+
+- Si existe el TLQV.
+- Su instrucción.
+- Si está DESPACHADA.
+- Número de venta.
+- Descripción.
+- Fecha de recepción.
+- Fecha de salida.
+- Fecha límite.
+- Fecha de instrucción.
+
+Campos relevantes:
+
+- TLQV
+- Instruccion
+- N venta
+- Descripción
+- Fecha recepcion
+- Fecha Salida
+- Fecha Limite
+- fecha Instruccion
+
+Endpoints externos usados:
+
+GET /sheet/stock-bue
+GET /sheet/stock-bue/{tlqvCode}
+
+La lectura completa:
+
+- Se realiza con paginación.
+- Reintenta errores transitorios.
+- Elimina filas repetidas si la planilla cambia mientras se está recorriendo.
+- Valida la secuencia de páginas.
+- Envuelve errores HTTP con contexto para no propagar errores Axios crudos.
+
+Código principal:
+
+- src/core/driver/repository/spreadsheet-api/stock-bue/GetOneStockBueItemsRepository.ts
+- src/core/driver/repository/spreadsheet-api/stock-bue/GetAllStockBueItemsRepository.ts
+- src/core/driver/repository/spreadsheet-api/stock-bue/GetStockBueItemByTlqvCodeRepository.ts
+
+
+3.2. Madre API
+--------------
+
+Madre es la persistencia central para:
+
+- Comprobantes obtenidos de Xubio.
+- Sync runs del backfill.
+- Validación de existencia de comprobantes por TLQV.
+- Búsqueda masiva por códigos TLQV.
+- Issues fiscales.
+- Issues de clientes.
+- Issues del flujo de facturación bulk.
+
+Endpoints consumidos:
+
+/api/internal/xubio/comprobantes
+/api/internal/xubio/comprobantes/upsert/batch
+/api/internal/xubio/comprobantes/by-tlqv-codes
+/api/internal/xubio/comprobantes/by-tlqv-code/{tlqv}
+/api/internal/xubio/comprobantes/exists-by-tlqv-code/{tlqv}
+/api/internal/xubio/comprobantes/sync-runs
+/api/internal/invoice/client-issues
+
+La comunicación usa MADRE_INTERNAL_API_KEY en el encabezado x-internal-api-key.
+
+Código:
+
+- src/core/driver/repository/madre-api/xubio/comprobantes/MadreXubioComprobantesRepository.ts
+- src/core/driver/repository/madre-api/invoice/client-issues/MadreInvoiceClientIssuesRepository.ts
+
+
+3.3. Ops API
+------------
+
+Es la primera fuente para obtener detalles de la orden y del comprador.
+
+Endpoint:
+
+GET https://ops.api.loquieroaca.com/api/order-details?tlqtNumber=TLQV-XXXX
+
+Datos extraídos:
+
+- CUIT del comprador.
+- CUIT de envío.
+- Nombre del destinatario.
+- Teléfono canónico, teléfono normal o teléfono legacy.
+- Dirección.
+- Ciudad.
+- Provincia.
+- Código postal.
+- Email.
+- Número de venta.
+- Producto.
+- SKU.
+- ASIN.
+- Cantidades de unidad y bundle.
+- Precio de venta.
+- Precio Amazon en USD.
+- Precio unitario Amazon en USD.
+- Estados operativos.
+
+Normalizaciones y validaciones:
+
+- CUIT/CUIL se reduce a dígitos.
+- Las direcciones reemplazan comas por espacios y compactan espacios repetidos.
+- Los campos numéricos pueden venir como número o string numérico.
+- Un HTTP 404 se trata como no encontrado.
+- Los estados not_found o not found se tratan como no encontrado.
+- Una respuesta sin sale se trata como no encontrada.
+- Una respuesta success con esquema inválido se rechaza.
+- Si la respuesta incluye un tlqtNumber diferente del solicitado, se rechaza.
+- El timeout default es 20 segundos.
+
+Código:
+src/core/driver/repository/ops-api/order-details/GetTlqvOrderDetailsRepository.ts
+
+
+3.4. Flokzu
+-----------
+
+Es el fallback cuando Ops API no encuentra la orden.
+
+Consulta una instancia de proceso por identificador TLQV y extrae variables como:
+
+- CUITCOMPRADOR
+- CUITENVIO
+- NOMBREDESTINATARIO
+- Dirección
+- Ciudad
+- Provincia
+- Código postal
+- Teléfono
+- Email
+
+Código:
+
+- src/core/driver/repository/flokzu/process-instance/GetFlokzuProcessInstanceRepository.ts
+- src/core/driver/repository/flokzu/order-details/GetTlqvOrderDetailsRepository.ts
+
+Importante: si Ops API devuelve un error técnico, no necesariamente se pasa a Flokzu. El fallback está pensado principalmente para una respuesta válida “no encontrado”.
+
+
+3.5. TusFacturas / AFIP / ARCA
+------------------------------
+
+Se usa para obtener:
+
+- Razón social.
+- Condición impositiva.
+- Dirección.
+- Localidad.
+- Código postal.
+- Provincia.
+- Estado fiscal.
+
+Endpoint:
+
+POST /app/api/v2/clientes/afip-info
+
+Credenciales enviadas:
+
+- usertoken
+- apikey
+- apitoken
+- cookie opcional
+
+Validaciones:
+
+- El documento se normaliza eliminando todo lo que no sea dígito.
+- Debe contener exactamente 11 dígitos para consultar TusFacturas.
+- Se formatea como XX-XXXXXXXX-X.
+- Actualmente se infiere CUIL cuando el prefijo numérico es mayor o igual a 30; en caso contrario, CUIT.
+- El tipo puede sobrescribirse explícitamente.
+- Reintenta errores de red y HTTP 408, 429, 500, 502, 503 y 504.
+- Default: dos intentos.
+- Espera default: 250 ms.
+
+Una respuesta con error: "S" se considera documento inválido, salvo que simultáneamente incluya razón social, condición impositiva y estado utilizables. En ese caso prevalecen los datos fiscales válidos.
+
+La respuesta puede contener los datos fiscales en el nivel raíz o anidados dentro de:
+
+- data
+- respuesta
+- resultado
+- cliente
+
+Código:
+src/core/driver/repository/tus-facturas/afip-info/GetTusFacturasAfipInfoRepository.ts
+
+
+3.6. Planillas financieras TLQV y MADRE
+---------------------------------------
+
+Spreadsheet por defecto: prueba-lectura.
+
+Puede configurarse con:
+SPREADSHEET_API_INVOICE_SPREADSHEET_NAME
+
+Endpoints:
+
+GET /sheet/{spreadsheetName}/TLQV/{tlqvCode}
+GET /sheet/{spreadsheetName}/MADRE/{tlqvCode}
+
+La solapa TLQV aporta principalmente:
+
+- Pagos por cuenta y orden.
+- Derechos de importación.
+- Tasa estadística.
+- IVA importación.
+- Gastos documentales.
+- Flete internacional.
+
+La solapa MADRE aporta:
+
+- Comisión Mercado Libre.
+- Costo de envío/flete doméstico.
+- Número de venta para la descripción de la factura.
+
+Fallback:
+
+- Si el spreadsheet configurado no contiene el TLQV, se vuelve a buscar en prueba-lectura.
+- Si tampoco aparece, se consulta Stock BUE directamente para mejorar el diagnóstico.
+
+Diagnósticos posibles:
+
+- Existe en Stock BUE y está despachado: faltan los importes financieros.
+- Existe en Stock BUE pero no está despachado: todavía no debe facturarse.
+- Tampoco existe en Stock BUE: código no encontrado.
+- La consulta directa falla: no hubo respuesta utilizable.
+
+
+4. NORMALIZACIÓN DEL CÓDIGO TLQV
+================================
+
+En los flujos principales:
+
+- Se elimina whitespace al inicio y final.
+- Se convierte a mayúsculas.
+- Si el texto contiene TLQV seguido de dígitos, se extrae TLQV-<número>.
+
+Ejemplos:
+
+- "tlqv-1569" -> "TLQV-1569"
+- "Factura TLQV-1569 prueba" -> "TLQV-1569"
+- "TLQV 1569" puede ser reconocido en los parsers de comprobantes/auditoría.
+
+En el script CSV también se eliminan ceros iniciales del número:
+
+- TLQV-0001569 -> TLQV-1569
+
+
+5. VALIDACIÓN PREVIA DE FACTURACIÓN
+===================================
+
+Código:
+src/core/interactors/tlqv-invoice/preparacion/PrepareTlqvInvoiceInteractor.ts
+
+Para devolver READY deben cumplirse todas estas condiciones:
+
+1. El TLQV existe en Stock BUE.
+2. Su instrucción normalizada es exactamente DESPACHADA.
+3. Madre pudo validar su estado de facturación.
+4. Madre informa que no existe un comprobante para el TLQV.
+
+Blockers posibles:
+
+CACHE_NOT_READY
+La caché de Stock BUE todavía no fue cargada y no hubo fallback directo utilizable.
+
+BILLING_VALIDATION_UNAVAILABLE
+Madre no pudo confirmar si está facturado. Se bloquea por seguridad.
+
+ALREADY_BILLED
+Madre informa que ya existe comprobante.
+
+NOT_FOUND_IN_STOCK_BUE
+No aparece en caché ni en consulta directa.
+
+NOT_DISPATCHED
+Existe, pero no está marcado como DESPACHADA.
+
+El fallback directo a Spreadsheet API se usa cuando:
+
+- No hay ítem en caché.
+- La caché todavía no está lista.
+- El ítem cacheado existe pero no figura despachado, para evitar bloquear por información desactualizada.
+
+La validación contra Madre y la lectura de caché se ejecutan inicialmente en paralelo.
+
+Si Madre falla, no se asume “no facturado”: se devuelve BILLING_VALIDATION_UNAVAILABLE.
+
+
+6. RESOLUCIÓN Y CREACIÓN DEL CLIENTE XUBIO
+==========================================
+
+Código:
+src/core/interactors/tlqv-invoice/clientes/CreateXubioClienteFromTlqvInteractor.ts
+
+Orden de ejecución:
+
+1. Ejecuta la preparación del TLQV.
+2. Busca la orden primero en Ops API y después en Flokzu.
+3. Antes de consultar AFIP, intenta encontrar un cliente existente en Xubio.
+4. Si no existe, valida el documento con TusFacturas.
+5. Construye el payload de cliente.
+6. Crea el cliente en Xubio.
+7. Si Xubio responde “ya existe” sin devolver el cliente, lo vuelve a localizar.
+
+
+6.1. Búsqueda de cliente existente
+----------------------------------
+
+Se generan candidatos de búsqueda con:
+
+- Nombre del comprador.
+- Razón social.
+- TLQV-{CUIT}.
+- CUIT con formato.
+- CUIT sin formato.
+- DNI con puntos.
+- DNI sin puntos.
+
+Un resultado se acepta si coincide por:
+
+- usrCode.
+- CUIT normalizado.
+- DNI normalizado.
+- Nombre o razón social, solamente cuando está permitido el match por nombre.
+
+Esto evita:
+
+- Duplicar clientes.
+- Bloquear una factura porque Xubio rechazó un alta ya existente.
+- Consultar innecesariamente TusFacturas si ya existe información fiscal suficiente en Xubio.
+
+Cuando se encuentra un cliente existente, la condición fiscal se deriva de su categoría Xubio:
+
+- RI -> RESPONSABLE INSCRIPTO
+- MT -> MONOTRIBUTO
+- CF -> CONSUMIDOR FINAL
+- EX -> EXENTO
+- Si existe nombre de categoría, se usa el nombre.
+- Si la identificación es DNI, se considera CONSUMIDOR FINAL.
+- Fallback final: CONSUMIDOR FINAL.
+
+
+6.2. Blockers del flujo de cliente
+----------------------------------
+
+ORDER_DETAILS_NOT_FOUND
+No aparece ni en Ops API ni en Flokzu.
+
+MISSING_BUYER_CUIT
+La orden no contiene documento del comprador.
+
+FISCAL_INFO_UNAVAILABLE
+TusFacturas falló técnicamente.
+
+MISSING_FISCAL_RAZON_SOCIAL
+TusFacturas no devolvió razón social.
+
+MISSING_FISCAL_CONDICION_IMPOSITIVA
+TusFacturas no devolvió condición fiscal.
+
+XUBIO_EXISTING_CLIENT_LOOKUP_FAILED
+Falló la búsqueda preventiva o la búsqueda posterior a un “ya existe”.
+
+XUBIO_EXISTING_CLIENT_NOT_FOUND
+Xubio dijo que el cliente existe, pero no pudo recuperarse su ID.
+
+
+6.3. Payload de cliente normal
+------------------------------
+
+- nombre: comprador o razón social.
+- razonSocial: valor obtenido de TusFacturas.
+- primerNombre: primera palabra del nombre.
+- primerApellido: resto de las palabras.
+- identificacionTributaria.codigo: CUIT o CUIL.
+- categoriaFiscal.codigo:
+  - Monotributo -> MT
+  - Responsable inscripto / IVA responsable -> RI
+  - Consumidor final -> CF
+  - Exento -> EX
+- pais.codigo: ARGENTINA.
+- cuit y CUIT: CUIT formateado.
+- direccion: dato del comprador.
+- codigoPostal: elimina el prefijo "CP:" si existe.
+- provincia: objeto con nombre de provincia.
+- usrCode: TLQV-{documento sin formato}.
+- descripcion: Cliente creado automáticamente desde TLQV.
+- esclienteextranjero: 0.
+- esProveedor: 0.
+
+El CUIT normal debe contener exactamente 11 dígitos.
+
+La creación directa rechaza condiciones impositivas desconocidas si no se especifica categoriaFiscalCodigo explícitamente.
+
+
+6.4. Detección de cliente ya existente
+--------------------------------------
+
+El driver interpreta como “already_exists” mensajes de Xubio que contengan variantes de:
+
+- número de identificación ya ha sido cargado
+- ya existe el código
+- ya existe el nombre
+- ha sido creado anteriormente
+
+Cuando hay tlqvCode, se registra el issue XUBIO_CLIENT_ALREADY_EXISTS.
+
+
+7. FALLBACK CONSUMIDOR FINAL
+============================
+
+Si TusFacturas rechaza el documento o faltan datos fiscales, se intenta derivar un DNI.
+
+Reglas:
+
+- Documento de 11 dígitos: toma los dígitos 3 a 10, eliminando prefijo y verificador.
+- Documento de 10 dígitos con prefijo 20, 23, 24, 27 o 30: elimina los dos primeros.
+- Documento de 7 u 8 dígitos: se usa directamente.
+- Debe existir nombre de comprador.
+
+Se crea el cliente con:
+
+- Identificación tributaria DNI.
+- Categoría fiscal CF.
+- Condición impositiva interna CONSUMIDOR FINAL.
+- DNI con puntos.
+- Nombre y razón social iguales al nombre del comprador.
+- usrCode conservando el documento original: TLQV-{documentoOriginal}.
+
+Si el DNI no puede derivarse, se crea un issue INVALID_FISCAL_DOCUMENT y se detiene la factura.
+
+También existe un endpoint manual que crea el consumidor final desde un issue abierto, permitiendo pasar el DNI explícitamente.
+
+Código:
+src/core/interactors/tlqv-invoice/clientes/CreateXubioConsumidorFinalClienteFromIssueInteractor.ts
+
+Reglas de selección del issue:
+
+- Si se informa issueId, busca exactamente ese issue.
+- Si no se informa, busca issues INVALID_FISCAL_DOCUMENT.
+- Prioriza uno abierto.
+- Si no hay abierto, usa el más reciente.
+
+Blockers de este flujo:
+
+- ISSUE_NOT_FOUND
+- ISSUE_REASON_NOT_SUPPORTED
+- ISSUE_NOT_OPEN
+- MISSING_DNI
+- MISSING_BUYER_NAME
+
+
+8. CONSULTA FISCAL Y REGISTRO DE DOCUMENTO INVÁLIDO
+===================================================
+
+Si TusFacturas devuelve invalid_document y existe un tlqvCode:
+
+- Se registra un issue INVALID_FISCAL_DOCUMENT en Madre.
+- Se guarda número de venta.
+- Nombre del comprador.
+- Email.
+- Documento original.
+- Documento normalizado.
+- Tipo de documento.
+- Mensajes de TusFacturas.
+- Payload raw.
+- Metadata de Ops API, Flokzu y Stock BUE.
+
+Antes de llamar a TusFacturas, un documento con longitud distinta de 11 dígitos devuelve invalid_document localmente y no hace la llamada externa.
+
+
+9. RESOLUCIÓN DE LETRA DE FACTURA
+=================================
+
+Código:
+src/core/interactors/xubio/facturas/ResolveXubioInvoiceLetterInteractor.ts
+
+Reglas actuales:
+
+- Responsable inscripto -> A
+- Monotributo / monotributista -> A
+- Consumidor final -> B
+- Exento -> B
+- Exterior / extranjero -> B
+- IVA no alcanzado -> B
+- Condición desconocida o vacía -> B
+
+La comparación ignora:
+
+- Mayúsculas/minúsculas.
+- Acentos.
+- Guiones bajos.
+- Guiones.
+- Espacios repetidos.
+
+El resultado informa también qué regla produjo la letra:
+
+- RESPONSABLE_INSCRIPTO
+- MONOTRIBUTISTA
+- CONSUMIDOR_FINAL
+- EXENTO
+- EXTERIOR
+- IVA_NO_ALCANZADO
+- DEFAULT_B
+
+
+10. CONSTRUCCIÓN DE LA FACTURA
+==============================
+
+Código:
+src/core/interactors/tlqv-invoice/facturas/BuildXubioInvoiceFromTlqvInteractor.ts
+
+
+10.1. Conceptos e IDs Xubio
+---------------------------
+
+Pagos por cuenta y orden
+ID Xubio: 2461025
+Fuente: TLQV, campo Productoco
+
+Derechos de importación pagados por cuenta y orden
+ID Xubio: 2461058
+Fuente factura A: TLQV, campo DIFACTURA, dividido por 1.21
+Fuente factura B: TLQV, campo DIFACTURA.B
+
+Tasa de estadística pagada por cuenta y orden
+ID Xubio: 2461065
+Fuente factura A: TLQV, campo TEFACTURA, dividido por 1.21
+Fuente factura B: TLQV, campo TEFACTURA.B
+
+IVA importación pagado por cuenta y orden
+ID Xubio: 2461066
+Fuente: TLQV, campo IVAFACTURA
+
+Gastos documentales Aduana
+ID Xubio: 2461080
+Fuente factura A: TLQV, campo LAFACTURA
+Fuente factura B: TLQV, campo LAFACTURA.B
+
+Comisiones externas
+ID Xubio: 2460999
+Fuente factura A: MADRE, campo COMISIONML, dividido por 1.21
+Fuente factura B: MADRE, campo COMISIONML
+
+Fletes domésticos
+ID Xubio: 2461000
+Fuente factura A: MADRE, campo COSTOENVIO, dividido por 1.21
+Fuente factura B: MADRE, campo COSTOENVIO
+
+Flete internacional
+ID Xubio: 2461081
+Fuente factura A: TLQV, campo FLETEINTERNACIONALA
+Fuente factura B: TLQV, campo FLETEINTERNACIONALB
+
+
+10.2. Parseo y normalización de importes
+---------------------------------------
+
+Los importes pueden venir como:
+
+- number
+- string
+- boolean
+- array de strings
+- null
+- undefined
+
+Reglas:
+
+- null, undefined o string vacío -> 0.
+- Número finito -> se usa.
+- Número no finito -> 0.
+- Boolean true -> 1.
+- Boolean false -> 0.
+- Array -> se toma el primer elemento.
+- Se eliminan símbolos $.
+- Se eliminan espacios.
+- Se eliminan caracteres que no sean dígito, coma, punto o signo menos.
+- Se interpretan separadores argentinos e internacionales.
+- Si existen coma y punto, el último separador determina cuál es el decimal.
+- Si sólo existe coma y tiene uno o dos decimales, se trata como separador decimal.
+- Se redondea a dos decimales.
+- Los conceptos con importe final 0 se omiten.
+- Si todos los conceptos quedan en 0, se bloquea la construcción.
+
+
+10.3. Valores fijos de factura
+------------------------------
+
+- Tipo: Factura.
+- Punto de venta: 216731.
+- Depósito: -2.
+- Cantidad por concepto: 1.
+- Cotización: 1.
+- Fecha de vencimiento: igual a fecha de emisión.
+- Descripción: TLQV-XXXX ML: {NROVENTA} si MADRE tiene NROVENTA.
+- Si no hay NROVENTA, la descripción es sólo el TLQV.
+- Descuento: 0.
+- Factura B: priceWithVat contiene el importe.
+- Factura A: priceWithVat = 0.
+
+Validaciones de construcción:
+
+- tlqvCode no vacío.
+- customerId entero positivo.
+- issueDate con formato ISO.
+- dueDate con formato ISO.
+- pointOfSaleId entero positivo.
+- warehouseId entero.
+- Al menos un ítem facturable.
+
+
+11. VALIDACIÓN DE FECHA DE EMISIÓN
+==================================
+
+La fecha sólo se valida cuando el flujo avanza hasta invoice_creation.
+
+Reglas:
+
+- Formato YYYY-MM-DD.
+- Debe ser una fecha real del calendario.
+- No puede estar en el futuro.
+- No puede tener más de diez días de antigüedad.
+- Si no se informa, usa la fecha actual.
+- fechaFactura es alias de issueDate.
+- Si se envían ambos con valores diferentes, devuelve HTTP 400.
+
+Blocker:
+INVALID_INVOICE_ISSUE_DATE
+
+La fecha se valida antes de crear o buscar el cliente cuando se pide invoice_creation, evitando efectos secundarios si ya se sabe que la fecha es inválida.
+
+Si Xubio rechaza la emisión porque ya existe un comprobante posterior en la misma numeración, el error se transforma en:
+
+XUBIO_INVOICE_DATE_SEQUENCE_ERROR
+
+Otros rechazos de emisión se transforman en:
+
+XUBIO_INVOICE_CREATION_FAILED
+
+
+12. ORQUESTADOR PRINCIPAL DE FACTURACIÓN
+========================================
+
+Código:
+src/core/interactors/tlqv-invoice/facturas/CreateTlqvInvoiceFlowInteractor.ts
+
+Etapas:
+
+1. client
+2. source_data
+3. invoice_creation
+
+Estados de etapa:
+
+- completed
+- blocked
+- skipped
+
+Estados generales:
+
+- completed
+- blocked
+
+stopAfter admite:
+
+- client
+- source_data
+- invoice_creation
+
+Default de stopAfter:
+source_data
+
+Default de dryRun:
+true
+
+Consecuencia importante:
+
+Una llamada sin parámetros adicionales puede crear o resolver el cliente y leer datos fuente, pero no emite factura.
+
+Para emitir realmente:
+
+{
+  "tlqvCode": "TLQV-1569",
+  "stopAfter": "invoice_creation",
+  "dryRun": false
+}
+
+
+12.1. Etapa client
+------------------
+
+- Ejecuta el flujo completo del cliente.
+- Si no puede continuar, traduce sus problemas a blockers del paso client.
+- Si el documento fiscal es inválido y no derivable, devuelve INVALID_FISCAL_DOCUMENT.
+- Si el cliente fue creado, mensaje: Cliente creado en Xubio.
+- Si ya existía, mensaje: Cliente ya existente en Xubio.
+- Si stopAfter=client, devuelve nextStep=source_data.
+
+
+12.2. Etapa source_data
+-----------------------
+
+Busca en paralelo:
+
+- Ítem TLQV financiero.
+- Ítem MADRE financiero.
+
+Fallbacks:
+
+- TLQV en spreadsheet configurado.
+- TLQV en prueba-lectura.
+- Stock BUE directo sólo para diagnóstico si falta TLQV financiero.
+
+Blockers:
+
+SPREADSHEET_SOURCE_DATA_UNAVAILABLE
+No se pudieron obtener datos de TLQV/MADRE por un error técnico.
+
+TLQV_SHEET_ITEM_NOT_FOUND
+No existe el registro financiero TLQV.
+
+MADRE_SHEET_ITEM_NOT_FOUND
+No existe el registro MADRE.
+
+Si stopAfter=source_data, devuelve nextStep=invoice_creation.
+
+
+12.3. Etapa invoice_creation
+----------------------------
+
+Validaciones previas:
+
+- Debe existir xubioClienteId.
+- TLQV y MADRE deben estar encontrados.
+- El payload debe poder construirse.
+- Debe existir repositorio de creación Xubio.
+
+Blockers adicionales:
+
+XUBIO_CLIENTE_ID_NOT_AVAILABLE
+Existe una respuesta de cliente, pero sin ID para facturar.
+
+SOURCE_DATA_NOT_AVAILABLE
+No están disponibles las dos fuentes requeridas.
+
+INVOICE_BUILD_FAILED
+Falló la construcción o todos los importes quedaron en cero.
+
+INVOICE_CREATION_REPOSITORY_NOT_CONFIGURED
+No existe driver configurado para emitir.
+
+XUBIO_INVOICE_CREATION_FAILED
+Xubio rechazó o no pudo procesar la factura.
+
+Si dryRun=true:
+
+- Se arma invoiceBuild.
+- No se llama a Xubio.
+- La etapa queda skipped.
+- Se devuelve el payload para inspección.
+
+Si dryRun=false:
+
+- Se llama a Xubio.
+- Se parsea la respuesta.
+- Se devuelve transaccionId, número de documento, CAE y demás datos disponibles.
+
+
+13. CREACIÓN REAL EN XUBIO
+==========================
+
+Endpoint:
+
+POST /API/1.1/facturar
+
+Payload principal:
+
+- Circuito contable ID -2.
+- Cliente por ID.
+- Tipo 1 para factura.
+- Tipo 3 para nota de crédito.
+- Fecha y vencimiento.
+- Punto de venta.
+- Condición de pago 1.
+- Depósito.
+- Cotización.
+- Descripción.
+- Productos.
+- Percepciones.
+- Cobranzas.
+- Documento asociado obligatorio para nota de crédito.
+
+Validaciones del driver:
+
+- customerId entero positivo.
+- Fechas YYYY-MM-DD.
+- pointOfSaleId entero positivo.
+- Cotización positiva.
+- Al menos un ítem.
+- productId positivo.
+- warehouseId entero, permitiendo -2.
+- Descripción no vacía.
+- Cantidad positiva.
+- Precio e importes finitos.
+- Documento asociado obligatorio para nota de crédito.
+- IDs de percepciones y cobranzas válidos cuando están presentes.
+- Respuesta Xubio validada campo por campo.
+
+Código:
+src/core/driver/repository/xubio/facturas/CreateInvoiceRepository.ts
+
+
+14. ELIMINACIÓN DE FACTURAS DE PRUEBA
+=====================================
+
+Se puede eliminar una factura mediante transaccionId.
+
+Endpoint interno:
+DELETE /internal/tlqv-invoice/facturas/:transaccionId
+
+Endpoint Xubio utilizado:
+/API/1.1/comprobanteVentaBean
+
+Validaciones:
+
+- transaccionId debe ser entero positivo.
+- Los errores de Xubio se envuelven con status y body.
+- Ante 401/403 se invalida el token y se reintenta.
+
+Se pensó principalmente para pruebas controladas antes de pedir CAE.
+
+
+15. FACTURACIÓN MASIVA
+======================
+
+Cola:
+tlqv-invoice-facturas-bulk
+
+Job:
+create-from-tlqv
+
+Comportamiento:
+
+- Normaliza códigos a mayúsculas.
+- Extrae TLQV-\d+ si el texto contiene más información.
+- Elimina duplicados.
+- Genera un batchId único.
+- Crea un jobId por batch y TLQV.
+- Fuerza stopAfter=invoice_creation.
+- Mantiene dryRun=true por defecto.
+- Inserta jobs en chunks de 500 por defecto.
+- Concurrencia default: 1.
+- Intentos default: 3.
+- Backoff fijo default: 30 segundos.
+- Retiene 5.000 jobs completos.
+- Retiene 5.000 jobs fallidos.
+- Espera hasta 10 segundos a que Redis/cola estén disponibles antes de devolver 503.
+
+Blockers que disparan reintento:
+
+- BILLING_VALIDATION_UNAVAILABLE
+- FISCAL_INFO_UNAVAILABLE
+- SPREADSHEET_SOURCE_DATA_UNAVAILABLE
+- XUBIO_INVOICE_CREATION_FAILED
+
+No se reintentan blockers de negocio definitivos como:
+
+- Ya facturado.
+- No despachado.
+- Documento inválido no derivable.
+- Datos financieros inexistentes.
+- Fecha inválida.
+- Error cronológico específico de Xubio.
+
+Al agotar intentos se registra un issue en Madre con:
+
+- Batch y job.
+- Intento y máximo de intentos.
+- Fecha solicitada.
+- Resultado completo.
+- Blockers.
+- Datos de comprador disponibles.
+- Número de venta.
+- Documento fiscal.
+- transaccionId y numeroDocumento si existen.
+
+Los bloqueos definitivos también se registran, salvo INVALID_FISCAL_DOCUMENT porque ese issue ya se registra en el flujo fiscal.
+
+Los errores no controlados al agotar intentos se registran como TLQV_INVOICE_JOB_FAILED.
+
+Código:
+src/app/services/tlqv-invoice-facturas-bulk-queue.service.ts
+
+
+16. BACKFILL DE COMPROBANTES XUBIO A MADRE
+==========================================
+
+Código:
+src/core/interactors/xubio/comprobantes/BackfillXubioComprobantesInteractor.ts
+
+El backfill:
+
+1. Normaliza parámetros.
+2. Crea un sync run en Madre, salvo que reciba syncRunId.
+3. Divide el rango general en ventanas.
+4. Internamente consulta Xubio día por día.
+5. Lista comprobantes con paginación por lastTransactionID.
+6. Consulta el detalle individual.
+7. Normaliza y mapea los datos.
+8. Hace upsert en Madre por lotes.
+9. Actualiza contadores y estado del sync run.
+
+Defaults:
+
+- fechaDesde: 2025-01-01.
+- fechaHasta: hoy.
+- batchSize: 10.
+- windowSizeDays: 3.
+- xubioLimit: 100.
+- Espera entre detalles: 250 ms.
+
+Límites:
+
+- batchSize: entero entre 1 y 500.
+- windowSizeDays: entero entre 1 y 31.
+- xubioLimit: entero entre 1 y 100.
+- syncRunId: entero positivo si se informa.
+- Espera entre detalles: entero no negativo.
+- Fechas reales YYYY-MM-DD.
+- fechaDesde no puede ser posterior a fechaHasta.
+
+
+16.1. Paginación defensiva
+--------------------------
+
+- Detecta cursor repetido.
+- Detecta páginas completas sin elementos nuevos.
+- Elimina transacciones duplicadas.
+- Filtra comprobantes fuera del rango.
+- Continúa si las primeras páginas completas son posteriores al rango buscado.
+- Registra diagnósticos de cada página.
+- Limita la consulta a 100 porque valores mayores volvieron inestable la API de Xubio.
+
+
+16.2. Mapeo a Madre
+--------------------
+
+- Tipo 1 -> INVOICE.
+- Tipo 3 -> CREDIT_NOTE.
+- Documento que contiene FCE -> FCE.
+- Otros -> UNKNOWN.
+- TLQV extraído con variantes TLQV123, TLQV-123 o espacios.
+- Mercado Libre extraído únicamente después de ML: y con entre 8 y 30 dígitos.
+- La letra se obtiene del primer carácter de numeroDocumento.
+- La presencia de CAE determina fiscalmenteEmitido.
+- La fecha de vencimiento del CAE se transforma de [año, mes, día] a YYYY-MM-DD.
+
+Se persiste:
+
+- ID de transacción Xubio.
+- External ID.
+- Número de documento.
+- Tipo y clase documental.
+- Letra.
+- Descripción.
+- Código y número TLQV.
+- Orden Mercado Libre.
+- Fecha de emisión y vencimiento.
+- Importes gravados, impuestos y total.
+- Moneda y cotización.
+- Circuito contable.
+- Depósito.
+- Condición de pago.
+- Punto de venta.
+- Cliente Xubio.
+- Provincia.
+- CAE.
+- Estado fiscal.
+- Productos.
+- Cobranzas.
+- Percepciones.
+- Payload de listado y detalle originales.
+
+
+16.3. Manejo de errores de upsert
+---------------------------------
+
+Si un batch Madre falla:
+
+- Se divide recursivamente en dos.
+- Se reintentan ambas mitades.
+- Si falla un único comprobante, se contabiliza como fallido y se continúa.
+- Se genera un diagnóstico de tamaños, longitudes y campos del payload para localizar problemas de esquema o límites.
+
+El sync termina:
+
+- completed: sin fallos.
+- partial: al menos un detalle o upsert falló.
+- failed: error fatal del flujo.
+
+Contadores:
+
+- totalListed
+- totalDetailRequests
+- totalInserted
+- totalUpdated
+- totalFailed
+
+
+17. COLA DEL BACKFILL
+=====================
+
+Cola:
+xubio-comprobantes-backfill
+
+Job:
+historical-backfill
+
+El endpoint asíncrono:
+
+1. Espera que la cola esté disponible.
+2. Crea primero el sync run en Madre.
+3. Encola el job usando sync-run-{id} como jobId.
+4. Si falla el encolado, marca el sync run como fallido.
+
+Defaults de cola:
+
+- Concurrencia: 1.
+- Intentos: 3.
+- Backoff fijo: 30 segundos.
+- Retención completados: 1.000.
+- Retención fallidos: 1.000.
+- Timeout de disponibilidad: 10 segundos.
+
+
+18. CACHÉ STOCK BUE
+===================
+
+El refresco:
+
+- Lee toda la planilla paginada.
+- Normaliza códigos TLQV.
+- Agrupa por código.
+- Si un TLQV aparece varias veces, prioriza una fila DESPACHADA.
+- Conserva rawData.
+
+Métricas generadas:
+
+- Filas totales.
+- Filas con TLQV.
+- Filas sin TLQV.
+- TLQV únicos.
+- Filas despachadas.
+- Despachadas con TLQV.
+- Despachadas sin TLQV.
+- TLQV únicos despachados.
+- Conteo por instrucción.
+
+Código:
+src/core/interactors/stock-bue/RefreshStockBueTlqvCacheInteractor.ts
+
+
+18.1. Cola y cron de refresco
+-----------------------------
+
+Cola:
+stock-bue-tlqv-cache-refresh
+
+Job:
+refresh
+
+Comportamiento:
+
+- Permite refresco manual.
+- Registra un cron cada hora por defecto: 0 * * * *.
+- Elimina registros cron anteriores del mismo job antes de registrar el actual.
+- Tres intentos por defecto.
+- Backoff fijo de 30 segundos.
+- Concurrencia 1.
+- Retiene 1.000 completados y 1.000 fallidos.
+- Page size del cron: 100.
+
+
+18.2. Advertencia sobre persistencia de caché
+---------------------------------------------
+
+Aunque las colas usan Redis, el repositorio actual del snapshot Stock BUE usa cache-manager sin un store Redis configurado explícitamente.
+
+Por lo tanto, el snapshot es memoria local del proceso:
+
+- Se pierde al reiniciar.
+- No se comparte correctamente entre múltiples instancias.
+- Una instancia que no ejecutó el refresco puede tener caché vacía aunque otra sí lo haya hecho.
+
+Archivo:
+src/app/drivers/cache/stock-bue/stock-bue-tlqv-cache-manager.repository.ts
+
+
+19. LISTADO DE TLQV DESPACHADOS NO FACTURADOS
+=============================================
+
+Código:
+src/core/interactors/stock-bue/FindUnbilledDispatchedStockBueTlqvInteractor.ts
+
+El flujo:
+
+1. Obtiene snapshot de Stock BUE.
+2. Filtra únicamente instrucción DESPACHADA.
+3. Agrupa por TLQV.
+4. Consulta Madre en batches, default 500.
+5. Considera facturado sólo un documento INVOICE o uno sin documentKind definido por compatibilidad.
+6. Excluye CREDIT_NOTE, FCE u otros tipos explícitos.
+7. Devuelve los TLQV despachados no encontrados como factura.
+
+Si la caché no está lista, lanza StockBueTlqvCacheNotReadyError.
+
+Respuesta:
+
+- Fecha de refresco.
+- Total de TLQV en caché.
+- Filas totales.
+- Filas despachadas.
+- Despachadas sin TLQV.
+- TLQV despachados únicos.
+- TLQV facturados.
+- TLQV no facturados.
+- Lista completa con metadatos Stock BUE.
+
+
+20. ISSUES REGISTRADOS
+======================
+
+Razones soportadas:
+
+- INVALID_FISCAL_DOCUMENT
+- XUBIO_CLIENT_ALREADY_EXISTS
+- MISSING_BUYER_CUIT
+- MISSING_FISCAL_RAZON_SOCIAL
+- MISSING_FISCAL_CONDICION_IMPOSITIVA
+- TLQV_INVOICE_FLOW_BLOCKED
+- TLQV_INVOICE_JOB_FAILED
+
+Estados:
+
+- open
+- resolved
+- ignored
+
+Fuentes:
+
+- flokzu
+- tus_facturas
+- xubio
+- invoice_api
+- manual
+
+Cada issue puede guardar:
+
+- ID.
+- Key.
+- TLQV.
+- Razón.
+- Fuente.
+- Estado.
+- Severidad.
+- Número de venta.
+- Nombre.
+- Email.
+- CUIT.
+- Tipo de documento.
+- Documento original.
+- Documento normalizado.
+- Mensaje principal.
+- Lista de mensajes.
+- Cantidad de ocurrencias.
+- Primera detección.
+- Última detección.
+- Payload raw.
+- Metadata.
+
+La consulta de snapshot permite filtrar por:
+
+- reason
+- status
+- limit positivo
+
+
+21. ENDPOINTS DISPONIBLES
+=========================
+
+Todos los endpoints internal/* requieren:
+
+x-internal-api-key: <INVOICE_INTERNAL_API_KEY>
+
+La comparación se hace con timingSafeEqual.
+
+
+21.1. Salud
+-----------
+
+GET /
+
+Endpoint público simple. Devuelve Hello World!.
+
+
+21.2. Comprobantes Xubio
+------------------------
+
+POST /internal/xubio/comprobantes/backfill
+
+Encola backfill asíncrono.
+
+POST /internal/xubio/comprobantes/backfill/run-now
+
+Ejecuta el backfill dentro de la request. Pensado para pruebas cortas.
+
+
+21.3. Stock BUE
+---------------
+
+POST /internal/xubio/comprobantes/stock-bue/tlqv-cache/refresh
+
+Encola refresco manual.
+
+GET /internal/xubio/comprobantes/stock-bue/unbilled-dispatched-tlqv
+
+Lista despachados no facturados. Acepta comprobantesBatchSize positivo.
+
+
+21.4. Preparación
+-----------------
+
+POST /internal/xubio/comprobantes/tlqv-invoice/prepare
+
+Body:
+{
+  "tlqvCode": "TLQV-7734"
+}
+
+
+21.5. Clientes TLQV
+-------------------
+
+POST /internal/tlqv-invoice/clientes/create-from-tlqv
+
+Body:
+{
+  "tlqvCode": "TLQV-14921"
+}
+
+POST /internal/tlqv-invoice/clientes/create-consumidor-final-from-issue
+
+Body:
+{
+  "tlqvCode": "TLQV-7734",
+  "issueId": 123,
+  "dni": "44482399"
+}
+
+issueId y dni son opcionales.
+
+
+21.6. Facturas
+--------------
+
+POST /internal/tlqv-invoice/facturas/create-from-tlqv
+
+Body posible:
+{
+  "tlqvCode": "TLQV-1569",
+  "stopAfter": "invoice_creation",
+  "dryRun": false,
+  "issueDate": "2026-08-18"
+}
+
+POST /internal/tlqv-invoice/facturas/bulk/create-from-tlqv
+
+Body:
+{
+  "tlqvCodes": ["TLQV-15783", "TLQV-15723"],
+  "dryRun": false,
+  "issueDate": "2026-08-18"
+}
+
+DELETE /internal/tlqv-invoice/facturas/:transaccionId
+
+
+21.7. Issues
+------------
+
+GET /internal/tlqv-invoice/issues
+
+Query params opcionales:
+
+- reason
+- status
+- limit
+
+GET /internal/tlqv-invoice/issues/:tlqvCode
+
+
+21.8. TusFacturas
+-----------------
+
+POST /internal/tus-facturas/afip-info
+
+Body:
+{
+  "tlqvCode": "TLQV-14921",
+  "documentoNro": "20-42433388-4",
+  "documentoTipo": "CUIT"
+}
+
+cuit se acepta como alias de documentoNro.
+
+
+21.9. Cliente Xubio directo
+---------------------------
+
+POST /internal/xubio/clientes
+
+Permite crear un cliente cuando ya se conocen CUIT/CUIL, razón social y condición impositiva.
+
+
+22. VALIDACIONES HTTP
+=====================
+
+El proyecto no usa actualmente DTOs con class-validator ni un ValidationPipe global.
+
+Las validaciones de entrada se realizan manualmente en controllers y parsers.
+
+Reglas principales:
+
+- Strings requeridos: deben existir y no quedar vacíos luego de trim.
+- Enteros positivos: Number.isInteger y valor mayor o igual a 1.
+- Booleanos: deben ser boolean reales, no strings "true"/"false".
+- tlqvCodes: array no vacío de strings no vacíos.
+- stopAfter: client, source_data o invoice_creation.
+- issueDate/fechaFactura: YYYY-MM-DD.
+- documentoTipo: CUIT o CUIL.
+- categoriaFiscalCodigo: MT, RI, CF o EX.
+- status de issue: open, resolved o ignored.
+- reason de issue: debe pertenecer al listado conocido.
+
+Errores HTTP de entrada se devuelven como BadRequestException/400.
+
+
+23. AUTENTICACIÓN INTERNA
+=========================
+
+Guard:
+src/app/guards/internal-api-key.guard.ts
+
+Comportamiento:
+
+- Lee INVOICE_INTERNAL_API_KEY.
+- Si no existe, devuelve 401.
+- Lee x-internal-api-key.
+- Si no existe o no coincide, devuelve 401.
+- Compara buffers del mismo tamaño usando timingSafeEqual.
+
+
+24. AUTENTICACIÓN Y RESILIENCIA XUBIO
+=====================================
+
+Token endpoint:
+/API/1.1/TokenEndpoint
+
+Comportamiento:
+
+- Usa Basic authorization para solicitar el token.
+- No duplica el prefijo Basic si ya fue proporcionado.
+- Cachea el access token.
+- Acepta expires_in numérico o string numérico.
+- Considera el token vencido 60 segundos antes de su expiración real.
+- Ante HTTP 401 o 403, invalida el token y reintenta.
+- Reintenta errores de red.
+- Reintenta HTTP 408.
+- Reintenta HTTP 429.
+- Reintenta cualquier HTTP 5xx.
+- Usa backoff exponencial.
+
+Defaults internos generales:
+
+- Máximo 4 intentos si no se configura.
+- Espera inicial 1 segundo.
+- Espera máxima 10 segundos.
+
+Configuración del proyecto sugerida en .env.example:
+
+- XUBIO_REQUEST_RETRY_ATTEMPTS=6
+- XUBIO_REQUEST_RETRY_INITIAL_DELAY_MS=2000
+- XUBIO_REQUEST_RETRY_MAX_DELAY_MS=30000
+
+
+25. RESILIENCIA DE SPREADSHEET Y MADRE
+======================================
+
+Spreadsheet API:
+
+- Timeouts configurables.
+- Lectura masiva de Stock BUE con tres intentos por defecto.
+- Delay entre intentos default 1 segundo.
+- Detecta esquemas inválidos.
+- Detecta páginas inconsistentes.
+- Evita propagar errores Axios crudos fuera del driver.
+
+Madre API:
+
+- Timeout default 20 segundos.
+- Usa API key interna.
+- Valida los cuerpos recibidos antes de exponerlos al core.
+- Los upserts vacíos se rechazan.
+- La búsqueda con lista vacía devuelve items vacíos sin llamada externa.
+
+
+26. REDIS, BULLMQ Y BULL BOARD
+==============================
+
+Redis puede configurarse con:
+
+- REDIS_URL
+- REDIS_HOST
+- REDIS_PORT
+- REDIS_DB
+- REDIS_USERNAME
+- REDIS_PASSWORD
+- REDIS_TLS
+
+Defaults:
+
+- Host: 127.0.0.1.
+- Puerto: 6379.
+- DB: 0.
+- Connect timeout: 10 segundos.
+- Keep alive: 30 segundos.
+- Max delay de retry: 2 segundos.
+- maxRetriesPerRequest: null, requerido por BullMQ.
+
+Bull Board expone las tres colas:
+
+- xubio-comprobantes-backfill
+- stock-bue-tlqv-cache-refresh
+- tlqv-invoice-facturas-bulk
+
+Path default:
+/admin/queues
+
+
+27. SWAGGER
+===========
+
+Swagger está habilitado por defecto.
+
+Path default:
+/api/docs
+
+Incluye:
+
+- Esquema de autenticación x-internal-api-key.
+- Tags por módulo.
+- Ejemplos de requests y responses.
+- Persistencia de autorización en Swagger UI.
+- Orden alfabético de tags.
+- Orden de operaciones por método.
+
+
+28. AUDITORÍA CSV DE XUBIO
+==========================
+
+Comando:
+
+npm run audit:xubio-csv -- --csv "/ruta/export-xubio.csv"
+
+Opciones:
+
+--csv
+Requerido. CSV exportado desde Xubio.
+
+--out
+Opcional. Escribe el informe JSON.
+
+--batch-size
+Opcional. Default 200.
+
+--timeout-ms
+Opcional. Default 60.000.
+
+--help
+Muestra ayuda.
+
+Variables requeridas:
+
+- MADRE_API_BASE_URL
+- MADRE_INTERNAL_API_KEY
+
+El script:
+
+- Carga .env si existe sin sobrescribir variables ya definidas.
+- Detecta delimitador CSV.
+- Tolera distintos nombres normalizados de columnas.
+- Extrae TLQV desde la descripción antes de ML:.
+- Si no lo encuentra allí, busca en toda la fila.
+- Normaliza ceros iniciales.
+- Consulta Madre en lotes.
+- Detecta duplicados dentro del CSV.
+
+Columnas reconocidas con alias:
+
+- Número de documento.
+- Fecha.
+- Descripción/detalle/concepto.
+- Estado/mensaje.
+- Importe total.
+- CAE.
+- Organización/cliente.
+- Tipo de factura.
+
+Reporte:
+
+- TLQV duplicados en CSV.
+- TLQV inexistentes en Madre.
+- TLQV que existen en Madre pero no como INVOICE.
+- Totales por documentKind.
+- Cantidad total de filas.
+- Filas con TLQV.
+- Ocurrencias TLQV.
+- TLQV únicos.
+- Encontrados como cualquier documento.
+- Encontrados como factura.
+- Detalle de cada ocurrencia y fila CSV.
+
+Archivo:
+scripts/audit-xubio-csv-vs-madre.ts
+
+
+29. CONFIGURACIÓN
+=================
+
+Variables requeridas para el flujo completo:
+
+INVOICE_INTERNAL_API_KEY
+XUBIO_BASIC_AUTHORIZATION
+MADRE_API_BASE_URL
+MADRE_INTERNAL_API_KEY
+TUS_FACTURAS_USER_TOKEN
+TUS_FACTURAS_API_KEY
+TUS_FACTURAS_API_TOKEN
+
+Variables opcionales o con default:
+
+PORT
+HOST
+
+XUBIO_BASE_URL
+XUBIO_INVOICE_TIMEOUT_MS
+XUBIO_COMPROBANTES_LIST_LIMIT
+XUBIO_COMPROBANTES_DETAIL_REQUEST_DELAY_MS
+XUBIO_REQUEST_RETRY_ATTEMPTS
+XUBIO_REQUEST_RETRY_INITIAL_DELAY_MS
+XUBIO_REQUEST_RETRY_MAX_DELAY_MS
+
+OPS_API_BASE_URL
+OPS_API_TIMEOUT_MS
+
+FLOKZU_BASE_URL
+FLOKZU_API_KEY
+FLOKZU_USERNAME
+
+TUS_FACTURAS_BASE_URL
+TUS_FACTURAS_COOKIE
+
+SPREADSHEET_API_BASE_URL
+SPREADSHEET_API_INVOICE_SPREADSHEET_NAME
+SPREADSHEET_API_TIMEOUT_MS
+SPREADSHEET_API_REQUEST_ATTEMPTS
+SPREADSHEET_API_RETRY_DELAY_MS
+
+MADRE_API_TIMEOUT_MS
+
+REDIS_URL
+REDIS_HOST
+REDIS_PORT
+REDIS_DB
+REDIS_USERNAME
+REDIS_PASSWORD
+REDIS_TLS
+REDIS_CONNECT_TIMEOUT_MS
+REDIS_KEEP_ALIVE_MS
+REDIS_RETRY_MAX_DELAY_MS
+
+SWAGGER_ENABLED
+SWAGGER_PATH
+BULL_BOARD_ENABLED
+BULL_BOARD_BASE_PATH
+
+Variables de cola de comprobantes:
+
+XUBIO_COMPROBANTES_QUEUE_CONCURRENCY
+XUBIO_COMPROBANTES_QUEUE_ATTEMPTS
+XUBIO_COMPROBANTES_QUEUE_RETRY_DELAY_MS
+XUBIO_COMPROBANTES_QUEUE_REMOVE_COMPLETE_COUNT
+XUBIO_COMPROBANTES_QUEUE_REMOVE_FAIL_COUNT
+XUBIO_COMPROBANTES_QUEUE_READY_TIMEOUT_MS
+
+Variables de caché Stock BUE:
+
+STOCK_BUE_TLQV_CACHE_KEY_PREFIX
+STOCK_BUE_TLQV_CACHE_TTL_MS
+STOCK_BUE_TLQV_CACHE_PAGE_SIZE
+STOCK_BUE_TLQV_CACHE_CRON_ENABLED
+STOCK_BUE_TLQV_CACHE_REFRESH_CRON
+STOCK_BUE_TLQV_CACHE_QUEUE_CONCURRENCY
+STOCK_BUE_TLQV_CACHE_QUEUE_ATTEMPTS
+STOCK_BUE_TLQV_CACHE_QUEUE_RETRY_DELAY_MS
+STOCK_BUE_TLQV_CACHE_QUEUE_REMOVE_COMPLETE_COUNT
+STOCK_BUE_TLQV_CACHE_QUEUE_REMOVE_FAIL_COUNT
+STOCK_BUE_TLQV_CACHE_QUEUE_READY_TIMEOUT_MS
+
+Variables de facturación bulk:
+
+TLQV_INVOICE_FACTURAS_BULK_QUEUE_ADD_CHUNK_SIZE
+TLQV_INVOICE_FACTURAS_BULK_QUEUE_ATTEMPTS
+TLQV_INVOICE_FACTURAS_BULK_QUEUE_CONCURRENCY
+TLQV_INVOICE_FACTURAS_BULK_QUEUE_READY_TIMEOUT_MS
+TLQV_INVOICE_FACTURAS_BULK_QUEUE_REMOVE_COMPLETE_COUNT
+TLQV_INVOICE_FACTURAS_BULK_QUEUE_REMOVE_FAIL_COUNT
+TLQV_INVOICE_FACTURAS_BULK_QUEUE_RETRY_DELAY_MS
+
+Ejemplo:
+.env.example
+
+
+30. PRUEBAS CUBIERTAS
+=====================
+
+Las 179 pruebas cubren, entre otros casos:
+
+- Consulta y parseo de TusFacturas.
+- Inferencia CUIT/CUIL.
+- Cookie opcional.
+- Documento inválido sin llamada externa.
+- Respuesta error S con datos fiscales utilizables.
+- Reintentos transitorios de TusFacturas.
+- Registro de issue fiscal.
+- Lectura TLQV y MADRE por código.
+- Respuesta 404 de Spreadsheet.
+- Rechazo de respuesta correspondiente a otro TLQV.
+- Links de celdas MADRE como arrays.
+- Lectura paginada de TLQV.
+- Detección de filas duplicadas.
+- Lectura Stock BUE aunque cambie metadata total durante la paginación.
+- Omisión de filas duplicadas si la planilla se desplaza.
+- Reintentos Stock BUE.
+- Preparación READY.
+- Bloqueo por factura existente.
+- Bloqueo por no despachado.
+- Fallback directo si la caché está vacía o desactualizada.
+- Bloqueo seguro si Madre no está disponible.
+- Datos de orden desde Ops API.
+- Fallback Ops API -> Flokzu.
+- Creación de cliente normal.
+- Uso de cliente Xubio existente antes de TusFacturas.
+- Recuperación del cliente cuando create devuelve already_exists.
+- Bloqueo cuando Xubio dice que existe pero no se encuentra.
+- Consumidor final desde documento rechazado de 11 dígitos.
+- Consumidor final desde documento de 10 dígitos derivable.
+- Consumidor final cuando falta condición fiscal.
+- Issue para documento no derivable.
+- Cliente consumidor final desde issue.
+- Override manual de DNI.
+- Bloqueo si no hay issue, DNI o nombre.
+- Mapeo de condición fiscal a categoría Xubio.
+- Resolución de factura A y B.
+- Construcción de importes netos para A.
+- Construcción de importes IVA incluido para B.
+- Payload /facturar.
+- Nota de crédito con documento asociado.
+- Rechazo de nota de crédito sin asociado.
+- Creación real de factura.
+- dryRun.
+- Fecha actual por defecto.
+- Rechazo de fecha futura.
+- Rechazo de fecha anterior a diez días.
+- Error cronológico de numeración Xubio.
+- Token Xubio.
+- Caché e invalidación del token.
+- Reintentos tras 401/403.
+- Listado paginado de comprobantes.
+- Cursores repetidos.
+- Páginas completas sin nuevos comprobantes.
+- Filtro por rango de fecha.
+- Backfill diario.
+- Upsert por lotes.
+- División de batches fallidos.
+- Estado partial ante fallos.
+- Extracción de TLQV y orden Mercado Libre.
+- Eliminación de factura.
+- Auditoría de despachados no facturados.
+
+
+31. ARQUITECTURA DE CÓDIGO
+==========================
+
+El proyecto está organizado con separación entre:
+
+src/core/entities
+Entidades y contratos de datos.
+
+src/core/adapters/repositories
+Interfaces de los repositorios requeridos por el dominio.
+
+src/core/interactors
+Casos de uso y reglas de negocio.
+
+src/core/driver/repository
+Implementaciones HTTP concretas para Xubio, Madre, Ops, Flokzu, TusFacturas y Spreadsheet API.
+
+src/app/controllers
+Adaptadores HTTP NestJS.
+
+src/app/services
+Servicios de aplicación y colas.
+
+src/app/modules
+Configuración de inyección de dependencias.
+
+src/app/drivers
+Infraestructura de Redis, cache-manager y utilidades de cola.
+
+La estructura sigue una idea cercana a arquitectura limpia/hexagonal:
+
+- El core depende de interfaces.
+- NestJS y Axios quedan en las capas externas.
+- Los interactores pueden probarse con repositorios simulados.
+
+
+32. ASPECTOS IMPORTANTES O PENDIENTES
+=====================================
+
+1. README desactualizado
+------------------------
+
+El README continúa siendo el template de NestJS y no documenta el sistema real.
+
+
+2. Validaciones HTTP manuales
+-----------------------------
+
+No hay ValidationPipe global ni DTOs con class-validator. Esto funciona, pero distribuye validaciones entre controllers, parsers, interactores y drivers.
+
+
+3. Swagger y Bull Board
+-----------------------
+
+Swagger y Bull Board no tienen aplicado explícitamente InternalApiKeyGuard.
+
+Si la API queda expuesta fuera de una red segura, se necesita protección en reverse proxy o aplicación para:
+
+- /api/docs
+- /admin/queues
+
+
+4. Caché Stock BUE local
+------------------------
+
+El snapshot no está persistido en Redis a pesar de que Redis está presente para BullMQ.
+
+
+5. billedComprobantes vacío
+---------------------------
+
+PrepareTlqvInvoiceResponse incluye billedComprobantes, pero actualmente siempre devuelve un array vacío. Sólo se usa el booleano exists de Madre.
+
+
+6. splitWindows y saturatedWindows
+---------------------------------
+
+En el backfill están declarados, pero actualmente no se alimentan. La paginación defensiva sí genera diagnósticos, pero no los transforma en esas colecciones.
+
+
+7. Inferencia CUIT/CUIL
+-----------------------
+
+La regla actual dice prefijo mayor o igual a 30 -> CUIL. Esto merece revisión fiscal, porque los CUIT de sociedades suelen comenzar con 30 o 33.
+
+
+8. Monotributista y letra A
+---------------------------
+
+La regla actual asigna letra A a monotributistas. Conviene confirmar que coincide con la definición contable deseada para todos los escenarios.
+
+
+9. Sin transacción distribuida
+------------------------------
+
+Un cliente puede crearse y luego fallar la factura. El diseño tolera esto buscando el cliente existente en la siguiente ejecución, pero no existe rollback distribuido.
+
+
+10. Dependencia del backfill
+---------------------------
+
+La validación de “ya facturado” depende de que Madre tenga los comprobantes suficientemente actualizados desde Xubio.
+
+
+11. Endpoint DELETE sensible
+-----------------------------
+
+El endpoint de eliminación es poderoso y sólo está protegido por la API key interna.
+
+
+12. Fecha validada antes del cliente
+------------------------------------
+
+Este punto es positivo: cuando se solicita invoice_creation, una fecha inválida bloquea el flujo antes de crear clientes.
+
+
+13. E2E limitado
+----------------
+
+La cobertura unitaria es amplia, pero falta una suite e2e representativa de los endpoints y módulos reales.
+
+
+14. Defaults seguros de emisión
+-------------------------------
+
+dryRun=true y stopAfter=source_data son defaults seguros, pero requieren que los operadores sepan que deben enviar explícitamente stopAfter=invoice_creation y dryRun=false para emitir.
+
+
+33. ARCHIVOS CENTRALES
+======================
+
+Orquestación completa:
+src/core/interactors/tlqv-invoice/facturas/CreateTlqvInvoiceFlowInteractor.ts
+
+Resolución/creación del cliente:
+src/core/interactors/tlqv-invoice/clientes/CreateXubioClienteFromTlqvInteractor.ts
+
+Consumidor final desde issue:
+src/core/interactors/tlqv-invoice/clientes/CreateXubioConsumidorFinalClienteFromIssueInteractor.ts
+
+Preparación y validación:
+src/core/interactors/tlqv-invoice/preparacion/PrepareTlqvInvoiceInteractor.ts
+
+Construcción de factura:
+src/core/interactors/tlqv-invoice/facturas/BuildXubioInvoiceFromTlqvInteractor.ts
+
+Letra A/B:
+src/core/interactors/xubio/facturas/ResolveXubioInvoiceLetterInteractor.ts
+
+Creación Xubio:
+src/core/driver/repository/xubio/facturas/CreateInvoiceRepository.ts
+
+Creación de cliente Xubio:
+src/core/driver/repository/xubio/clientes/CreateClienteRepository.ts
+
+Búsqueda de cliente Xubio:
+src/core/driver/repository/xubio/clientes/FindClienteRepository.ts
+
+TusFacturas:
+src/core/driver/repository/tus-facturas/afip-info/GetTusFacturasAfipInfoRepository.ts
+
+Ops API:
+src/core/driver/repository/ops-api/order-details/GetTlqvOrderDetailsRepository.ts
+
+Flokzu:
+src/core/driver/repository/flokzu/process-instance/GetFlokzuProcessInstanceRepository.ts
+
+Backfill:
+src/core/interactors/xubio/comprobantes/BackfillXubioComprobantesInteractor.ts
+
+Madre:
+src/core/driver/repository/madre-api/xubio/comprobantes/MadreXubioComprobantesRepository.ts
+
+Issues:
+src/core/entities/invoice/client-issues/InvoiceClientIssue.ts
+
+Facturación bulk:
+src/app/services/tlqv-invoice-facturas-bulk-queue.service.ts
+
+Refresco Stock BUE:
+src/core/interactors/stock-bue/RefreshStockBueTlqvCacheInteractor.ts
+
+Auditoría Stock BUE:
+src/core/interactors/stock-bue/FindUnbilledDispatchedStockBueTlqvInteractor.ts
+
+Caché:
+src/app/drivers/cache/stock-bue/stock-bue-tlqv-cache-manager.repository.ts
+
+Bootstrap, Swagger y Bull Board:
+src/main.ts
+
+Configuración de módulos:
+src/app/modules/app.module.ts
+
+Variables de entorno de ejemplo:
+.env.example
+
+Auditoría CSV:
+scripts/audit-xubio-csv-vs-madre.ts
+
+
+FIN DEL INFORME
+===============

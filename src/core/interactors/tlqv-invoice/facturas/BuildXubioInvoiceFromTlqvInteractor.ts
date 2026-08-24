@@ -19,11 +19,14 @@ const XUBIO_PRODUCT_IDS = {
   derechosImportacion: 2461058,
   tasaEstadistica: 2461065,
   ivaImportacion: 2461066,
+  impuestosInternos: 2826655,
   gastosDocumentalesAduana: 2461080,
   comisionesExternas: 2460999,
   fletesDomesticos: 2461000,
   fleteInternacional: 2461081,
 } as const;
+
+const TC_IMPUESTO_FIELD = 'tc impuesto';
 
 export interface BuildXubioInvoiceFromTlqvCommand {
   tlqvCode: string;
@@ -51,6 +54,8 @@ export interface XubioInvoiceItemMapping {
   rawValue: string | number | boolean | string[] | null | undefined;
   amount: number;
   divisor?: number;
+  multiplierField?: string;
+  multiplierValue?: number;
   skipped: boolean;
   skippedReason?: 'zero_or_empty_amount';
 }
@@ -64,6 +69,12 @@ type InvoiceItemDefinition = {
   sourceSheet: 'TLQV' | 'MADRE';
   sourceField: string;
   divisor?: number;
+  /**
+   * TLQV field to multiply the raw value by. Used for concepts (like Impuestos
+   * Internos / Anti Dumping) that only have a foreign-currency column in the
+   * sheet, unlike DI/TE/IVA/LA which already come pre-converted (...FACTURA).
+   */
+  multiplierField?: string;
 };
 
 export class BuildXubioInvoiceFromTlqvInteractor {
@@ -128,14 +139,20 @@ function buildItemMappings(
       definition.sourceSheet === 'TLQV'
         ? tlqvData[definition.sourceField]
         : madreData[definition.sourceField];
+    const multiplierValue =
+      definition.multiplierField === undefined
+        ? undefined
+        : parseMoneyLikeNumber(tlqvData[definition.multiplierField]);
     const amount = roundMoney(
-      parseMoneyLikeNumber(rawValue) / (definition.divisor ?? 1),
+      (parseMoneyLikeNumber(rawValue) * (multiplierValue ?? 1)) /
+        (definition.divisor ?? 1),
     );
 
     if (amount === 0) {
       return {
         ...definition,
         rawValue,
+        multiplierValue,
         amount,
         skipped: true,
         skippedReason: 'zero_or_empty_amount',
@@ -145,6 +162,7 @@ function buildItemMappings(
     return {
       ...definition,
       rawValue,
+      multiplierValue,
       amount,
       skipped: false,
     };
@@ -167,20 +185,25 @@ function getInvoiceItemDefinitions(
         productId: XUBIO_PRODUCT_IDS.derechosImportacion,
         sourceSheet: 'TLQV',
         sourceField: 'DIFACTURA',
-        divisor: VAT_21_DIVISOR,
       },
       {
         concept: 'Tasa de estadística pagados por cuenta y orden',
         productId: XUBIO_PRODUCT_IDS.tasaEstadistica,
         sourceSheet: 'TLQV',
         sourceField: 'TEFACTURA',
-        divisor: VAT_21_DIVISOR,
       },
       {
         concept: 'Iva importacion pagados por cuenta y orden',
         productId: XUBIO_PRODUCT_IDS.ivaImportacion,
         sourceSheet: 'TLQV',
         sourceField: 'IVAFACTURA',
+      },
+      {
+        concept: 'Impuestos internos pagados por cuenta y orden',
+        productId: XUBIO_PRODUCT_IDS.impuestosInternos,
+        sourceSheet: 'TLQV',
+        sourceField: 'Imp Internos',
+        multiplierField: TC_IMPUESTO_FIELD,
       },
       {
         concept: 'Gastos documentales Aduana',
@@ -235,6 +258,13 @@ function getInvoiceItemDefinitions(
       productId: XUBIO_PRODUCT_IDS.ivaImportacion,
       sourceSheet: 'TLQV',
       sourceField: 'IVAFACTURA',
+    },
+    {
+      concept: 'Impuestos internos pagados por cuenta y orden',
+      productId: XUBIO_PRODUCT_IDS.impuestosInternos,
+      sourceSheet: 'TLQV',
+      sourceField: 'Imp Internos',
+      multiplierField: TC_IMPUESTO_FIELD,
     },
     {
       concept: 'Gastos documentales Aduana',

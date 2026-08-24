@@ -4,6 +4,7 @@ import {
   SpreadsheetApiMadreByTlqvInvalidResponseError,
   SpreadsheetApiMadreByTlqvRequestError,
 } from './GetMadreItemByTlqvCodeRepository';
+import type { MadreItemData } from '../../../../entities/spreadsheet-api/madre/MadreItems';
 
 describe('GetMadreItemByTlqvCodeRepository', () => {
   it('gets a MADRE sheet item by TLQV code', async () => {
@@ -92,7 +93,7 @@ describe('GetMadreItemByTlqvCodeRepository', () => {
   });
 });
 
-function createMadreItemResponse() {
+function createMadreItemResponse(): { rowNumber: number; data: MadreItemData } {
   return {
     rowNumber: 1526,
     data: {

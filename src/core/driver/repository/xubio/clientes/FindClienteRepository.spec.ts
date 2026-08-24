@@ -120,10 +120,7 @@ describe('FindClienteRepository', () => {
     await expect(
       repository.findByName({ nombre: 'FELIPE ZAMPELLA' }),
     ).rejects.toEqual(
-      new XubioFindClienteRequestError(
-        'FELIPE ZAMPELLA',
-        'network detail',
-      ),
+      new XubioFindClienteRequestError('FELIPE ZAMPELLA', 'network detail'),
     );
   });
 });

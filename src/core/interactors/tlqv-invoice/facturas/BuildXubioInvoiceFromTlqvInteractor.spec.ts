@@ -25,9 +25,7 @@ describe('BuildXubioInvoiceFromTlqvInteractor', () => {
     });
 
     expect(result.invoiceLetter.letter).toBe('A');
-    expect(result.invoice.description).toBe(
-      'TLQV-15713 ML: 2000017369931210',
-    );
+    expect(result.invoice.description).toBe('TLQV-15713 ML: 2000017369931210');
     expect(result.invoice.items).toEqual([
       expect.objectContaining({
         productId: 2461025,
@@ -69,6 +67,99 @@ describe('BuildXubioInvoiceFromTlqvInteractor', () => {
         }),
         expect.objectContaining({
           productId: 2461065,
+          skipped: true,
+          skippedReason: 'zero_or_empty_amount',
+        }),
+      ]),
+    );
+  });
+
+  it('matches a real Xubio A invoice: DI/TE sent as-is (no VAT divisor) and Impuestos Internos multiplied by tc impuesto (TLQV-16887)', () => {
+    const result = new BuildXubioInvoiceFromTlqvInteractor().execute({
+      tlqvCode: 'TLQV-16887',
+      customerId: 9557555,
+      fiscalCondition: 'RESPONSABLE INSCRIPTO',
+      issueDate: '2026-08-20',
+      tlqvSheetItem: createTlqvItem({
+        Productoco: '943046.00',
+        DIFACTURA: '63083.97',
+        TEFACTURA: '9461.85',
+        IVAFACTURA: '215298.21',
+        'Imp Internos': '93.30',
+        'tc impuesto': '1499.50',
+        LAFACTURA: '21280.00',
+        FLETEINTERNACIONALA: '1795507.33',
+      }),
+      madreSheetItem: createMadreItem({
+        NROVENTA: '2000017655168916',
+        COMISIONML: '0',
+        COSTOENVIO: '0',
+      }),
+    });
+
+    expect(result.invoiceLetter.letter).toBe('A');
+    expect(result.itemMappings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          productId: 2461058,
+          sourceField: 'DIFACTURA',
+          amount: 63083.97,
+          skipped: false,
+        }),
+        expect.objectContaining({
+          productId: 2461065,
+          sourceField: 'TEFACTURA',
+          amount: 9461.85,
+          skipped: false,
+        }),
+        expect.objectContaining({
+          productId: 2826655,
+          sourceField: 'Imp Internos',
+          multiplierField: 'tc impuesto',
+          multiplierValue: 1499.5,
+          amount: 139903.35,
+          skipped: false,
+        }),
+      ]),
+    );
+    expect(result.invoice.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          productId: 2461058,
+          unitPrice: 63083.97,
+          priceWithVat: 0,
+        }),
+        expect.objectContaining({
+          productId: 2461065,
+          unitPrice: 9461.85,
+          priceWithVat: 0,
+        }),
+        expect.objectContaining({
+          productId: 2826655,
+          unitPrice: 139903.35,
+          priceWithVat: 0,
+        }),
+      ]),
+    );
+  });
+
+  it('skips Impuestos Internos when the TLQV sheet does not have that value', () => {
+    const result = new BuildXubioInvoiceFromTlqvInteractor().execute({
+      tlqvCode: 'TLQV-14921',
+      customerId: 10329110,
+      fiscalCondition: 'RESPONSABLE INSCRIPTO',
+      issueDate: '2026-07-30',
+      tlqvSheetItem: createTlqvItem({
+        Productoco: '204576.80',
+        'tc impuesto': '1499.50',
+      }),
+      madreSheetItem: createMadreItem({ NROVENTA: '2000017369931210' }),
+    });
+
+    expect(result.itemMappings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          productId: 2826655,
           skipped: true,
           skippedReason: 'zero_or_empty_amount',
         }),
@@ -172,7 +263,9 @@ function createTlqvItem(overrides: Partial<TlqvItem['data']> = {}): TlqvItem {
   };
 }
 
-function createMadreItem(overrides: Partial<MadreItem['data']> = {}): MadreItem {
+function createMadreItem(
+  overrides: Partial<MadreItem['data']> = {},
+): MadreItem {
   return {
     rowNumber: 20,
     data: {

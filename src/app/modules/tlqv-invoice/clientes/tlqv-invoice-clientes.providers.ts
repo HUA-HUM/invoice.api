@@ -2,11 +2,9 @@ import type { Provider } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GetFlokzuTlqvOrderDetailsRepository } from '../../../../core/driver/repository/flokzu/order-details/GetTlqvOrderDetailsRepository';
 import { GetOpsApiTlqvOrderDetailsRepository } from '../../../../core/driver/repository/ops-api/order-details/GetTlqvOrderDetailsRepository';
-import { GetStockBueItemByTlqvCodeRepository } from '../../../../core/driver/repository/spreadsheet-api/stock-bue/GetStockBueItemByTlqvCodeRepository';
 import { GetTusFacturasAfipInfoRepository } from '../../../../core/driver/repository/tus-facturas/afip-info/GetTusFacturasAfipInfoRepository';
 import { CreateXubioConsumidorFinalClienteFromIssueInteractor } from '../../../../core/interactors/tlqv-invoice/clientes/CreateXubioConsumidorFinalClienteFromIssueInteractor';
 import { CreateXubioClienteFromTlqvInteractor } from '../../../../core/interactors/tlqv-invoice/clientes/CreateXubioClienteFromTlqvInteractor';
-import { StockBueTlqvCacheManagerRepository } from '../../../drivers/cache/stock-bue/stock-bue-tlqv-cache-manager.repository';
 import {
   readNumberConfig,
   readOptionalConfig,
@@ -30,13 +28,9 @@ export const CREATE_XUBIO_CONSUMIDOR_FINAL_CLIENTE_FROM_ISSUE_INTERACTOR =
 export const tlqvInvoiceClientesInteractorProviders: Provider[] = [
   {
     provide: CREATE_XUBIO_CLIENTE_FROM_TLQV_INTERACTOR,
-    inject: [ConfigService, StockBueTlqvCacheManagerRepository],
-    useFactory: (
-      configService: ConfigService,
-      stockBueTlqvCacheRepository: StockBueTlqvCacheManagerRepository,
-    ) =>
+    inject: [ConfigService],
+    useFactory: (configService: ConfigService) =>
       new CreateXubioClienteFromTlqvInteractor(
-        stockBueTlqvCacheRepository,
         createMadreXubioComprobantesRepository(configService),
         [
           new GetOpsApiTlqvOrderDetailsRepository({
@@ -67,17 +61,6 @@ export const tlqvInvoiceClientesInteractorProviders: Provider[] = [
         createMadreInvoiceClientIssuesRepository(configService),
         () => new Date(),
         createXubioFindClienteRepository(configService),
-        new GetStockBueItemByTlqvCodeRepository({
-          baseUrl: readOptionalConfig(
-            configService,
-            'SPREADSHEET_API_BASE_URL',
-          ),
-          timeoutInMilliseconds: readNumberConfig(
-            configService,
-            'SPREADSHEET_API_TIMEOUT_MS',
-            10_000,
-          ),
-        }),
       ),
   },
   {

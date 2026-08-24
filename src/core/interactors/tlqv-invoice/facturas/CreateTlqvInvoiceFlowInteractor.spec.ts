@@ -264,6 +264,7 @@ describe('CreateTlqvInvoiceFlowInteractor', () => {
 
     expect(result.status).toBe('completed');
     expect(dependencies.createInvoice.create).toHaveBeenCalledWith({
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- expect.objectContaining() is typed `any` by Jest
       invoice: expect.objectContaining({
         type: 'Factura',
         customerId: 10270718,
@@ -382,12 +383,16 @@ describe('CreateTlqvInvoiceFlowInteractor', () => {
 });
 
 interface TestDependencies {
-  createCliente: jest.Mocked<ICreateXubioClienteFromTlqvUseCase>;
-  tlqvSheet: jest.Mocked<IGetTlqvItemByCodeRepository>;
-  fallbackTlqvSheet: jest.Mocked<IGetTlqvItemByCodeRepository>;
-  madreSheet: jest.Mocked<IGetMadreItemByTlqvCodeRepository>;
-  stockBueSheet: jest.Mocked<IGetStockBueItemByTlqvCodeRepository>;
-  createInvoice: jest.Mocked<ICreateXubioInvoiceRepository>;
+  createCliente: ICreateXubioClienteFromTlqvUseCase & { execute: jest.Mock };
+  tlqvSheet: IGetTlqvItemByCodeRepository & { getByCode: jest.Mock };
+  fallbackTlqvSheet: IGetTlqvItemByCodeRepository & { getByCode: jest.Mock };
+  madreSheet: IGetMadreItemByTlqvCodeRepository & {
+    getByTlqvCode: jest.Mock;
+  };
+  stockBueSheet: IGetStockBueItemByTlqvCodeRepository & {
+    getByTlqvCode: jest.Mock;
+  };
+  createInvoice: ICreateXubioInvoiceRepository & { create: jest.Mock };
 }
 
 function createInteractor(
@@ -480,6 +485,9 @@ function createClienteFlowResponse(): CreateXubioClienteFromTlqvResponse {
     tlqvCode: 'TLQV-1569',
     prepare: {} as never,
     fiscalInfo: {
+      documentoNro: '20-42433388-4',
+      documentoNroDigits: '20424333884',
+      documentoTipo: 'CUIT',
       razonSocial: 'ARTURO GUTIERREZ',
       condicionImpositiva: 'MONOTRIBUTO',
       direccion: 'OBLIGADO 3645',
@@ -493,6 +501,9 @@ function createClienteFlowResponse(): CreateXubioClienteFromTlqvResponse {
       status: 'found',
       found: true,
       afipInfo: {
+        documentoNro: '20-42433388-4',
+        documentoNroDigits: '20424333884',
+        documentoTipo: 'CUIT',
         razonSocial: 'ARTURO GUTIERREZ',
         condicionImpositiva: 'MONOTRIBUTO',
         direccion: 'OBLIGADO 3645',

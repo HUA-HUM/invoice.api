@@ -4,9 +4,7 @@ import {
   type CreateTlqvInvoiceFlowCommand,
   type CreateTlqvInvoiceFlowResponse,
 } from '../../core/interactors/tlqv-invoice/facturas/CreateTlqvInvoiceFlowInteractor';
-import {
-  DeleteXubioInvoiceInteractor,
-} from '../../core/interactors/xubio/facturas/DeleteXubioInvoiceInteractor';
+import { DeleteXubioInvoiceInteractor } from '../../core/interactors/xubio/facturas/DeleteXubioInvoiceInteractor';
 import type {
   DeleteXubioInvoiceCommand,
   DeleteXubioInvoiceResponse,
@@ -15,6 +13,9 @@ import {
   CREATE_TLQV_INVOICE_FLOW_INTERACTOR,
   DELETE_XUBIO_INVOICE_INTERACTOR,
 } from '../modules/tlqv-invoice/facturas/tlqv-invoice-facturas.providers';
+import { InvoiceClientIssueRecorderService } from './invoice-client-issue-recorder.service';
+
+const ISSUE_SOURCE = 'tlqv_invoice_facturas_single';
 
 @Injectable()
 export class TlqvInvoiceFacturasService {
@@ -23,12 +24,44 @@ export class TlqvInvoiceFacturasService {
     private readonly createTlqvInvoiceFlowInteractor: CreateTlqvInvoiceFlowInteractor,
     @Inject(DELETE_XUBIO_INVOICE_INTERACTOR)
     private readonly deleteXubioInvoiceInteractor: DeleteXubioInvoiceInteractor,
+    private readonly invoiceClientIssueRecorder: InvoiceClientIssueRecorderService,
   ) {}
 
-  createFromTlqv(
+  async createFromTlqv(
     command: CreateTlqvInvoiceFlowCommand,
   ): Promise<CreateTlqvInvoiceFlowResponse> {
-    return this.createTlqvInvoiceFlowInteractor.execute(command);
+    try {
+      const response =
+        await this.createTlqvInvoiceFlowInteractor.execute(command);
+
+      if (response.status === 'blocked') {
+        await this.invoiceClientIssueRecorder.recordBlocked({
+          tlqvCode: command.tlqvCode,
+          response,
+          source: ISSUE_SOURCE,
+          metadata: {
+            dryRun: command.dryRun,
+            issueDate: command.issueDate,
+            stopAfter: command.stopAfter,
+          },
+        });
+      }
+
+      return response;
+    } catch (error: unknown) {
+      await this.invoiceClientIssueRecorder.recordUnhandledFailure({
+        tlqvCode: command.tlqvCode,
+        error,
+        source: ISSUE_SOURCE,
+        metadata: {
+          dryRun: command.dryRun,
+          issueDate: command.issueDate,
+          stopAfter: command.stopAfter,
+        },
+      });
+
+      throw error;
+    }
   }
 
   deleteByTransaccionId(

@@ -33,6 +33,7 @@ export interface TlqvItemData {
   FLETEINTERNACIONALA: string;
   FLETEINTERNACIONALB: string;
   'NRO CARGA': string;
+  [field: string]: string | undefined;
 }
 
 export interface TlqvItem {

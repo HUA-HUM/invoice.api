@@ -539,7 +539,7 @@ export class CreateTlqvInvoiceFlowInteractor {
       return await this.stockBueItemByTlqvCodeRepository.getByTlqvCode({
         tlqvCode,
       });
-    } catch (_error: unknown) {
+    } catch {
       return undefined;
     }
   }

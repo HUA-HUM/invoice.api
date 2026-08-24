@@ -1,7 +1,5 @@
 import type { IInvoiceClientIssueRepository } from '../../../adapters/repositories/invoice/client-issues/IInvoiceClientIssueRepository';
-import type { IStockBueTlqvCacheRepository } from '../../../adapters/repositories/cache/stock-bue/IStockBueTlqvCacheRepository';
 import type { IMadreXubioComprobantesRepository } from '../../../adapters/repositories/madre-api/xubio/comprobantes/IMadreXubioComprobantesRepository';
-import type { IGetStockBueItemByTlqvCodeRepository } from '../../../adapters/repositories/spreadsheet-api/stock-bue/IGetStockBueItemByTlqvCodeRepository';
 import type { IGetTlqvOrderDetailsRepository } from '../../../adapters/repositories/tlqv/order-details/IGetTlqvOrderDetailsRepository';
 import type { IGetTusFacturasAfipInfoRepository } from '../../../adapters/repositories/tus-facturas/afip-info/IGetTusFacturasAfipInfoRepository';
 import type { ICreateXubioClienteRepository } from '../../../adapters/repositories/xubio/clientes/ICreateXubioClienteRepository';
@@ -36,12 +34,20 @@ const CONSUMIDOR_FINAL_CATEGORIA_FISCAL = 'CF';
 const DNI_IDENTIFICACION_TRIBUTARIA = 'DNI';
 const DNI_DERIVABLE_10_DIGIT_PREFIXES = new Set(['20', '23', '24', '27', '30']);
 
+const TLQV_INVOICEABLE_ESTADO_VBI_VALUES = [
+  'DESPACHADA_BUENOS_AIRES',
+  'ENTREGADO',
+  'RECIBIDO_BUENOS_AIRES',
+  'ETIQUETA_IMPRESA',
+] as const;
+
 export type CreateXubioClienteFromTlqvStatus =
   'created' | 'already_exists' | 'blocked' | 'invalid_fiscal_document';
 
 export type CreateXubioClienteFromTlqvBlockerCode =
   | PrepareTlqvInvoiceBlocker['code']
   | 'ORDER_DETAILS_NOT_FOUND'
+  | 'ORDER_STATUS_NOT_INVOICEABLE'
   | 'MISSING_BUYER_CUIT'
   | 'FISCAL_INFO_UNAVAILABLE'
   | 'MISSING_FISCAL_RAZON_SOCIAL'
@@ -88,7 +94,6 @@ export type CreateXubioClienteFromTlqvResponse =
 
 export class CreateXubioClienteFromTlqvInteractor {
   constructor(
-    private readonly stockBueTlqvCacheRepository: IStockBueTlqvCacheRepository,
     private readonly madreXubioComprobantesRepository: IMadreXubioComprobantesRepository,
     private readonly orderDetailsRepositories: IGetTlqvOrderDetailsRepository[],
     private readonly tusFacturasAfipInfoRepository: IGetTusFacturasAfipInfoRepository,
@@ -96,16 +101,13 @@ export class CreateXubioClienteFromTlqvInteractor {
     private readonly invoiceClientIssueRepository?: IInvoiceClientIssueRepository,
     private readonly getNow: () => Date = () => new Date(),
     private readonly findXubioClienteRepository?: IFindXubioClienteRepository,
-    private readonly stockBueItemByTlqvCodeRepository?: IGetStockBueItemByTlqvCodeRepository,
   ) {}
 
   async execute(
     command: CreateXubioClienteFromTlqvCommand,
   ): Promise<CreateXubioClienteFromTlqvResponse> {
     const prepareInteractor = new PrepareTlqvInvoiceInteractor(
-      this.stockBueTlqvCacheRepository,
       this.madreXubioComprobantesRepository,
-      this.stockBueItemByTlqvCodeRepository,
     );
     const prepare = await prepareInteractor.execute(command);
 
@@ -137,6 +139,26 @@ export class CreateXubioClienteFromTlqvInteractor {
 
     const buyerData = orderDetails.buyerData;
     const cuitCompradorDigits = buyerData.cuitCompradorDigits;
+
+    if (
+      orderDetails.source === 'ops_api' &&
+      !isInvoiceableEstadoVbi(orderDetails.statuses?.estadoVbi)
+    ) {
+      return {
+        status: 'blocked',
+        canContinue: false,
+        tlqvCode: prepare.tlqvCode,
+        prepare,
+        orderDetails,
+        buyerData,
+        blockers: [
+          {
+            code: 'ORDER_STATUS_NOT_INVOICEABLE',
+            message: `${prepare.tlqvCode} has order status "${orderDetails.statuses?.estadoVbi ?? 'UNKNOWN'}" in Ops API; it must be one of: ${TLQV_INVOICEABLE_ESTADO_VBI_VALUES.join(', ')}.`,
+          },
+        ],
+      };
+    }
 
     if (this.findXubioClienteRepository !== undefined) {
       let existingCliente: XubioCliente | undefined;
@@ -195,7 +217,7 @@ export class CreateXubioClienteFromTlqvInteractor {
 
     const documentoTipo = inferDocumentoTipo(cuitCompradorDigits);
     const issueContext = {
-      saleNumber: orderDetails.saleNumber ?? prepare.stockBueItem?.saleNumber,
+      saleNumber: orderDetails.saleNumber,
       buyerName: buyerData.nombreDestinatario,
       email: buyerData.email,
       metadata: {
@@ -205,15 +227,6 @@ export class CreateXubioClienteFromTlqvInteractor {
           tlqvCode: orderDetails.tlqvCode,
           saleNumber: orderDetails.saleNumber,
           source: orderDetails.source,
-        },
-        stockBue: {
-          rowNumber: prepare.stockBueItem?.rowNumber,
-          instruction: prepare.stockBueItem?.instruction,
-          description: prepare.stockBueItem?.description,
-          fechaRecepcion: prepare.stockBueItem?.fechaRecepcion,
-          fechaSalida: prepare.stockBueItem?.fechaSalida,
-          fechaLimite: prepare.stockBueItem?.fechaLimite,
-          fechaInstruccion: prepare.stockBueItem?.fechaInstruccion,
         },
         buyerData: {
           nombreDestinatario: buyerData.nombreDestinatario,
@@ -366,7 +379,7 @@ export class CreateXubioClienteFromTlqvInteractor {
           cuitDigits: cuitCompradorDigits,
           dniDigits: deriveDniDigitsFromDocumento(cuitCompradorDigits),
           buyerName: buyerData.nombreDestinatario,
-          razonSocial: fiscalInfo.razonSocial as string,
+          razonSocial: fiscalInfo.razonSocial,
           allowNameOnlyMatch: true,
         });
       } catch (error: unknown) {
@@ -855,6 +868,17 @@ function formatCuitIfPossible(digits: string): string {
 
 function hasValidFiscalDocumento(value: string | null | undefined): boolean {
   return normalizeOptionalString(value)?.replace(/\D/g, '').length === 11;
+}
+
+function isInvoiceableEstadoVbi(value: string | null | undefined): boolean {
+  const normalized = normalizeOptionalString(value)?.toUpperCase();
+  if (normalized === undefined) {
+    return false;
+  }
+
+  return (TLQV_INVOICEABLE_ESTADO_VBI_VALUES as readonly string[]).includes(
+    normalized,
+  );
 }
 
 function deriveDniDigitsFromDocumento(

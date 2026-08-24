@@ -16,8 +16,7 @@ export class TlqvInvoicePreparationController {
   @ApiInternalEndpoint()
   @ApiOperation({
     summary: 'Preparar/validar un TLQV antes de facturar',
-    description:
-      'Valida que el TLQV exista en Stock BUE, esté DESPACHADA y no figure facturado en Madre/Xubio.',
+    description: 'Valida que el TLQV no figure facturado en Madre/Xubio.',
   })
   @ApiBody({
     schema: {
@@ -42,7 +41,6 @@ export class TlqvInvoicePreparationController {
         canContinue: true,
         tlqvCode: 'TLQV-7734',
         isBilled: false,
-        isDispatched: true,
         billingValidationAvailable: true,
         blockers: [],
       },

@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TlqvInvoiceFacturasController } from '../../../controllers/tlqv-invoice-facturas.controller';
+import { InvoiceClientIssueRecorderService } from '../../../services/invoice-client-issue-recorder.service';
 import { TlqvInvoiceFacturasBulkQueueService } from '../../../services/tlqv-invoice-facturas-bulk-queue.service';
 import { TlqvInvoiceFacturasService } from '../../../services/tlqv-invoice-facturas.service';
 import { InternalAuthModule } from '../../shared/internal-auth/internal-auth.module';
@@ -18,6 +19,7 @@ import { tlqvInvoiceFacturasInteractorProviders } from './tlqv-invoice-facturas.
   controllers: [TlqvInvoiceFacturasController],
   providers: [
     ...tlqvInvoiceFacturasInteractorProviders,
+    InvoiceClientIssueRecorderService,
     TlqvInvoiceFacturasService,
     TlqvInvoiceFacturasBulkQueueService,
   ],

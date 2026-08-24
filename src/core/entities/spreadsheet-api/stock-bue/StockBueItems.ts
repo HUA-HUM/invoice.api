@@ -27,32 +27,6 @@ export interface StockBueItem {
   data: StockBueItemData;
 }
 
-export interface GetOneStockBueItemsCommand {
-  page: number;
-  pageSize: number;
-}
-
-export interface GetOneStockBueItemsResponse {
-  page: number;
-  pageSize: number;
-  totalRows: number;
-  totalPages: number;
-  hasNextPage: boolean;
-  hasPreviousPage: boolean;
-  rows: StockBueItem[];
-}
-
-export interface GetAllStockBueItemsCommand {
-  pageSize?: number;
-}
-
-export interface GetAllStockBueItemsResponse {
-  pageSize: number;
-  totalRows: number;
-  totalPages: number;
-  rows: StockBueItem[];
-}
-
 export interface GetStockBueItemByTlqvCodeCommand {
   tlqvCode: string;
 }
