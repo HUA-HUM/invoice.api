@@ -34,6 +34,14 @@ const CONSUMIDOR_FINAL_CATEGORIA_FISCAL = 'CF';
 const DNI_IDENTIFICACION_TRIBUTARIA = 'DNI';
 const DNI_DERIVABLE_10_DIGIT_PREFIXES = new Set(['20', '23', '24', '27', '30']);
 
+// Ops API still returns the pre-2007 "Capital Federal" name for some CABA
+// sales; Xubio's NXVProvincia catalog only recognizes
+// "Ciudad Autónoma de Buenos Aires" and rejects the old name outright.
+const XUBIO_PROVINCIA_NOMBRE_ALIASES: Record<string, string> = {
+  CAPITALFEDERAL: 'Ciudad Autónoma de Buenos Aires',
+  CABA: 'Ciudad Autónoma de Buenos Aires',
+};
+
 const TLQV_INVOICEABLE_ESTADO_VBI_VALUES = [
   'DESPACHADA_BUENOS_AIRES',
   'ENTREGADO',
@@ -366,7 +374,25 @@ export class CreateXubioClienteFromTlqvInteractor {
       direccion: buyerData.direccion,
       codigoPostal: buyerData.codigoPostal,
       provincia: buyerData.provincia,
+      // We attempt our own existing-cliente recovery right below — only
+      // record an issue if that recovery genuinely fails, not on every
+      // transient "already exists" response from Xubio.
+      skipAlreadyExistsIssueLogging: true,
     });
+
+    if (
+      xubioClienteResult.status === 'already_exists' &&
+      xubioClienteResult.cliente === undefined &&
+      this.findXubioClienteRepository === undefined
+    ) {
+      await this.recordAlreadyExistsIssueWithoutRecovery({
+        tlqvCode: prepare.tlqvCode,
+        cuitCompradorDigits,
+        documentoTipo,
+        alreadyExistsDetail: xubioClienteResult.alreadyExistsDetail,
+        rawPayload: xubioClienteResult.rawPayload,
+      });
+    }
 
     if (
       xubioClienteResult.status === 'already_exists' &&
@@ -635,6 +661,33 @@ export class CreateXubioClienteFromTlqvInteractor {
       ],
       rawPayload: command.invalidDocument.rawPayload,
       metadata: command.issueContext.metadata,
+      now: this.getNow(),
+    });
+  }
+
+  private async recordAlreadyExistsIssueWithoutRecovery(command: {
+    tlqvCode: string;
+    cuitCompradorDigits: string;
+    documentoTipo: TusFacturasDocumentoTipo;
+    alreadyExistsDetail?: string;
+    rawPayload?: unknown;
+  }): Promise<void> {
+    if (this.invoiceClientIssueRepository === undefined) {
+      return;
+    }
+
+    const message =
+      command.alreadyExistsDetail ?? 'Xubio cliente already exists';
+
+    await this.invoiceClientIssueRepository.upsert({
+      tlqvCode: command.tlqvCode,
+      reason: 'XUBIO_CLIENT_ALREADY_EXISTS',
+      source: 'xubio',
+      cuit: command.cuitCompradorDigits,
+      documentoTipo: command.documentoTipo,
+      message,
+      messages: [message],
+      rawPayload: command.rawPayload,
       now: this.getNow(),
     });
   }
@@ -959,7 +1012,7 @@ function buildConsumidorFinalClientePayload(command: {
       provincia === null
         ? null
         : {
-            nombre: provincia,
+            nombre: normalizeXubioProvinciaNombre(provincia),
           },
     usrCode: `TLQV-${command.originalDocumentoDigits}`,
     descripcion: DEFAULT_DESCRIPCION,
@@ -1015,6 +1068,16 @@ function normalizeForComparison(value: string | null | undefined): string {
       .trim()
       .toUpperCase() ?? ''
   );
+}
+
+function normalizeXubioProvinciaNombre(value: string): string {
+  const key = value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '');
+
+  return XUBIO_PROVINCIA_NOMBRE_ALIASES[key] ?? value;
 }
 
 function normalizeOptionalString(

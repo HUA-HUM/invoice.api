@@ -320,7 +320,7 @@ describe('CreateTlqvInvoiceFlowInteractor', () => {
       tlqvCode: 'TLQV-1569',
       item: {
         rowNumber: 1,
-        data: { OPERACIÓN: 'TLQV-1569', 'Precio de venta': '$779,041.80' },
+        data: { OPERACIÓN: 'TLQV-1569', 'Precio de venta': '$781,999.10' },
       },
     });
     const interactor = createInteractor(dependencies);
@@ -339,7 +339,7 @@ describe('CreateTlqvInvoiceFlowInteractor', () => {
     expect(dependencies.createInvoice.create).toHaveBeenCalled();
   });
 
-  it.each(['$779,042.80', '$779,040.80'])(
+  it.each(['$782,000.10', '$781,998.10'])(
     'creates the invoice when the total is off by up to $1 from "Precio de venta" (%s)',
     async (precioVenta) => {
       const dependencies = createDependencies();
@@ -374,7 +374,7 @@ describe('CreateTlqvInvoiceFlowInteractor', () => {
       tlqvCode: 'TLQV-1569',
       item: {
         rowNumber: 1,
-        data: { OPERACIÓN: 'TLQV-1569', 'Precio de venta': '$779,043.81' },
+        data: { OPERACIÓN: 'TLQV-1569', 'Precio de venta': '$782,001.11' },
       },
     });
     const interactor = createInteractor(dependencies);
@@ -424,7 +424,7 @@ describe('CreateTlqvInvoiceFlowInteractor', () => {
       expect.objectContaining({
         code: 'INVOICE_TOTAL_SALE_PRICE_MISMATCH',
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- expect.stringContaining() is typed `any` by Jest
-        message: expect.stringContaining('779041.80'),
+        message: expect.stringContaining('781999.10'),
       }),
     ]);
     expect(dependencies.createInvoice.create).not.toHaveBeenCalled();
@@ -712,7 +712,7 @@ function createDependencies(
         tlqvCode: 'TLQV-1569',
         item: {
           rowNumber: 1,
-          data: { OPERACIÓN: 'TLQV-1569', 'Precio de venta': '$779,041.80' },
+          data: { OPERACIÓN: 'TLQV-1569', 'Precio de venta': '$781,999.10' },
         },
       }),
     },

@@ -294,6 +294,67 @@ describe('CreateXubioClienteFromTlqvInteractor', () => {
     expect(repositories.xubioClientes.create).toHaveBeenCalled();
     expect(result.xubioClienteResult.cliente?.clienteId).toBe(10256469);
     expect(result.canContinue).toBe(true);
+    expect(repositories.issues.upsert).not.toHaveBeenCalled();
+  });
+
+  it('resolves an existing Xubio cliente by name only when Xubio rejects create as a duplicate name, without logging a spurious issue', async () => {
+    const repositories = createRepositories();
+    repositories.opsOrderDetails.getByTlqvCode.mockResolvedValue({
+      found: true,
+      orderDetails: createOrderDetails({
+        cuitComprador: '20-20870031-7',
+        cuitCompradorDigits: '20208700317',
+      }),
+    });
+    repositories.tusFacturas.getAfipInfo.mockResolvedValue({
+      status: 'found',
+      found: true,
+      afipInfo: {
+        documentoNro: '20-20870031-7',
+        documentoNroDigits: '20208700317',
+        documentoTipo: 'CUIT',
+        razonSocial: 'Juan Pablo Quiroga',
+        condicionImpositiva: 'MONOTRIBUTO',
+        direccion: 'San Juan 824 PA',
+        codigoPostal: '5600',
+        provincia: 'MENDOZA',
+        rawPayload: {},
+      },
+    });
+    repositories.xubioClientes.create.mockResolvedValue({
+      status: 'already_exists',
+      created: false,
+      alreadyExistsDetail:
+        'Ya existe el nombre Juan Pablo Quiroga, este ha sido creado anteriormente como Juan Pablo Quiroga.',
+      rawPayload: {
+        description:
+          'Ya existe el nombre Juan Pablo Quiroga, este ha sido creado anteriormente como Juan Pablo Quiroga.',
+      },
+    });
+    // The existing Xubio cliente has no usrCode/cuit recorded (e.g. created
+    // by a separate process), so it can only be matched by name.
+    repositories.xubioClientesFinder.findByName.mockResolvedValue({
+      clientes: [
+        {
+          clienteId: 10500001,
+          nombre: 'Juan Pablo Quiroga',
+          razonSocial: 'Juan Pablo Quiroga',
+          rawPayload: {},
+        },
+      ],
+      rawPayload: [],
+    });
+    const interactor = createInteractor(repositories);
+
+    const result = await interactor.execute({ tlqvCode: 'TLQV-18408' });
+
+    expect(result.status).toBe('already_exists');
+    if (result.status !== 'already_exists') {
+      throw new Error('Expected already_exists response');
+    }
+    expect(result.canContinue).toBe(true);
+    expect(result.xubioClienteResult.cliente?.clienteId).toBe(10500001);
+    expect(repositories.issues.upsert).not.toHaveBeenCalled();
   });
 
   it('blocks when an existing Xubio cliente cannot be found after already_exists', async () => {
@@ -324,6 +385,7 @@ describe('CreateXubioClienteFromTlqvInteractor', () => {
         code: 'XUBIO_EXISTING_CLIENT_NOT_FOUND',
       }),
     ]);
+    expect(repositories.issues.upsert).not.toHaveBeenCalled();
   });
 
   it('returns blocked when prepare validation blocks the TLQV', async () => {
@@ -463,6 +525,38 @@ describe('CreateXubioClienteFromTlqvInteractor', () => {
       },
     });
     expect(repositories.issues.upsert).not.toHaveBeenCalled();
+  });
+
+  it('normalizes buyer provincia "Capital Federal" for a consumidor final Xubio cliente', async () => {
+    const repositories = createRepositories();
+    repositories.opsOrderDetails.getByTlqvCode.mockResolvedValue({
+      found: true,
+      orderDetails: createOrderDetails({ provincia: 'Capital Federal' }),
+    });
+    repositories.tusFacturas.getAfipInfo.mockResolvedValue({
+      status: 'invalid_document',
+      found: false,
+      invalidDocument: {
+        documentoNro: '27-18771957-2',
+        documentoNroDigits: '27187719572',
+        documentoTipo: 'CUIT',
+        message: 'No pudimos obtener datos para el CUIT ingresado.',
+        messages: ['No pudimos obtener datos para el CUIT ingresado.'],
+        rawPayload: { error: 'S' },
+      },
+    });
+    const interactor = createInteractor(repositories);
+
+    await interactor.execute({ tlqvCode: 'TLQV-14921' });
+
+    expect(repositories.xubioClientes.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- expect.objectContaining() is typed `any` by Jest
+        cliente: expect.objectContaining({
+          provincia: { nombre: 'Ciudad Autónoma de Buenos Aires' },
+        }),
+      }),
+    );
   });
 
   it('creates a consumidor final Xubio cliente when TusFacturas rejects a 10 digit document with person prefix', async () => {
@@ -740,6 +834,7 @@ function createOrderDetails(
     source: 'ops_api' | 'flokzu';
     cuitComprador: string | null;
     cuitCompradorDigits: string | null;
+    provincia: string | null;
   }> = {},
   overrides: {
     estadoVbi?: string | null;

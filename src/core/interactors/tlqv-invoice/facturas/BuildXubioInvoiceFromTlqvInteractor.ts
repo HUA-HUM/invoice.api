@@ -234,7 +234,15 @@ function getInvoiceItemDefinitions(
         concept: 'Gastos documentales Aduana',
         productId: XUBIO_PRODUCT_IDS.gastosDocumentalesAduana,
         sourceSheet: 'TLQV',
-        sourceField: 'LAFACTURA',
+        // Product 2461080 is taxed at 21% in Xubio, so a letter A invoice
+        // sends it net and Xubio adds the VAT back on top — the sheet's
+        // LAFACTURA.B column is that gross value (LAFACTURA * 1.21), and it
+        // is what "Precio de venta" in costos-operaciones is built from.
+        // Reading the net column here made computeExpectedInvoiceTotal fall
+        // short by exactly the VAT and blocked otherwise valid invoices.
+        // The amount sent to Xubio is unchanged: LAFACTURA.B / 1.21.
+        sourceField: 'LAFACTURA.B',
+        divisor: VAT_21_DIVISOR,
       },
       {
         concept: 'Comisiones externas',

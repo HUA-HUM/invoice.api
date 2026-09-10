@@ -1,6 +1,9 @@
 import type { MadreItem } from '../../../entities/spreadsheet-api/madre/MadreItems';
 import type { TlqvItem } from '../../../entities/spreadsheet-api/tlqv/TlqvItems';
-import { BuildXubioInvoiceFromTlqvInteractor } from './BuildXubioInvoiceFromTlqvInteractor';
+import {
+  BuildXubioInvoiceFromTlqvInteractor,
+  computeExpectedInvoiceTotal,
+} from './BuildXubioInvoiceFromTlqvInteractor';
 
 describe('BuildXubioInvoiceFromTlqvInteractor', () => {
   it('builds an A invoice using net values', () => {
@@ -15,6 +18,7 @@ describe('BuildXubioInvoiceFromTlqvInteractor', () => {
         TEFACTURA: '0.00',
         IVAFACTURA: '20014.56',
         LAFACTURA: '21280.00',
+        'LAFACTURA.B': '25748.80',
         FLETEINTERNACIONALA: '326354.12',
       }),
       madreSheetItem: createMadreItem({
@@ -88,6 +92,7 @@ describe('BuildXubioInvoiceFromTlqvInteractor', () => {
         'Imp Internos': '93.30',
         'tc impuesto': '1499.50',
         LAFACTURA: '21280.00',
+        'LAFACTURA.B': '25748.80',
         FLETEINTERNACIONALA: '1795507.33',
       }),
       madreSheetItem: createMadreItem({
@@ -165,6 +170,44 @@ describe('BuildXubioInvoiceFromTlqvInteractor', () => {
         }),
       ]),
     );
+  });
+
+  it('counts the 21% VAT Xubio adds to Gastos documentales Aduana in the expected A total, while sending it net (TLQV-18860)', () => {
+    const result = new BuildXubioInvoiceFromTlqvInteractor().execute({
+      tlqvCode: 'TLQV-18860',
+      customerId: 10441659,
+      fiscalCondition: 'MONOTRIBUTO',
+      issueDate: '2026-08-31',
+      tlqvSheetItem: createTlqvItem({
+        Productoco: '0.00',
+        DIFACTURA: '102204.04',
+        TEFACTURA: '8763.80',
+        IVAFACTURA: '228916.50',
+        LAFACTURA: '21420.00',
+        'LAFACTURA.B': '25918.20',
+        FLETEINTERNACIONALA: '2100507.46',
+      }),
+      madreSheetItem: createMadreItem({
+        NROVENTA: '2000018197302938',
+        COMISIONML: '$406,280.00',
+        COSTOENVIO: '$29,410.00',
+      }),
+    });
+
+    const gastosDocumentales = result.itemMappings.find(
+      (mapping) => mapping.productId === 2461080,
+    );
+
+    // Sent net — byte-for-byte what Xubio received before this fix.
+    expect(gastosDocumentales?.amount).toBe(21420);
+    // Counted gross, because Xubio adds the 21% back on the letter A invoice.
+    expect(gastosDocumentales?.grossAmount).toBe(25918.2);
+    expect(
+      result.invoice.items.find((item) => item.productId === 2461080),
+    ).toEqual(expect.objectContaining({ unitPrice: 21420, priceWithVat: 0 }));
+
+    // "Precio de venta" in costos-operaciones for TLQV-18860.
+    expect(computeExpectedInvoiceTotal(result.itemMappings)).toBe(2902000);
   });
 
   it('builds a B invoice using VAT-included values', () => {

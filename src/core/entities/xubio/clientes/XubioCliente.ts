@@ -97,6 +97,14 @@ export interface CreateXubioClienteFromFiscalInfoCommand {
   codigoPostal?: string | null;
   provincia?: string | null;
   descripcion?: string | null;
+  /**
+   * When true, skips the automatic "already exists" issue upsert — used by
+   * callers that immediately attempt their own existing-cliente recovery and
+   * only want to record an issue if that recovery genuinely fails, instead
+   * of unconditionally logging every transient "already exists" response
+   * from Xubio (which is often followed by a successful recovery).
+   */
+  skipAlreadyExistsIssueLogging?: boolean;
 }
 
 export type CreateXubioClienteFromFiscalInfoResponse =

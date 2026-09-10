@@ -63,6 +63,64 @@ describe('CreateXubioClienteInteractor', () => {
     expect(result.status).toBe('created');
   });
 
+  it('normalizes "Capital Federal" to the provincia name Xubio actually recognizes', async () => {
+    const create: jest.MockedFunction<ICreateXubioClienteRepository['create']> =
+      jest.fn().mockResolvedValue({
+        status: 'created',
+        created: true,
+        cliente: {
+          clienteId: 10256469,
+          nombre: 'DANIEL JORGE FROMAN',
+          rawPayload: {},
+        },
+      });
+    const repository = {
+      create,
+    } as unknown as ICreateXubioClienteRepository;
+    const interactor = new CreateXubioClienteInteractor(repository);
+
+    await interactor.execute({
+      tlqvCode: 'TLQV-17887',
+      cuit: '20106616362',
+      razonSocial: 'DANIEL JORGE FROMAN',
+      condicionImpositiva: 'MONOTRIBUTO',
+      provincia: 'Capital Federal',
+    });
+
+    expect(create.mock.calls[0]?.[0].cliente.provincia).toEqual({
+      nombre: 'Ciudad Autónoma de Buenos Aires',
+    });
+  });
+
+  it('normalizes "CABA" to the provincia name Xubio actually recognizes', async () => {
+    const create: jest.MockedFunction<ICreateXubioClienteRepository['create']> =
+      jest.fn().mockResolvedValue({
+        status: 'created',
+        created: true,
+        cliente: {
+          clienteId: 10256470,
+          nombre: 'ANA MARIA GUERRIERI',
+          rawPayload: {},
+        },
+      });
+    const repository = {
+      create,
+    } as unknown as ICreateXubioClienteRepository;
+    const interactor = new CreateXubioClienteInteractor(repository);
+
+    await interactor.execute({
+      tlqvCode: 'TLQV-18399',
+      cuit: '27308593229',
+      razonSocial: 'ANA MARIA GUERRIERI',
+      condicionImpositiva: 'MONOTRIBUTO',
+      provincia: 'CABA',
+    });
+
+    expect(create.mock.calls[0]?.[0].cliente.provincia).toEqual({
+      nombre: 'Ciudad Autónoma de Buenos Aires',
+    });
+  });
+
   it('allows overriding categoriaFiscalCodigo', async () => {
     const create: jest.MockedFunction<ICreateXubioClienteRepository['create']> =
       jest.fn().mockResolvedValue({
