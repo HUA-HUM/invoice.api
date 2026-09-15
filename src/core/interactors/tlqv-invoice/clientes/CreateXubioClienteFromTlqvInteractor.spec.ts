@@ -231,6 +231,102 @@ describe('CreateXubioClienteFromTlqvInteractor', () => {
     expect(result.canContinue).toBe(true);
   });
 
+  it('recovers an existing Xubio cliente stored under a longer name, via the listing (TLQV-17518)', async () => {
+    const repositories = createRepositories();
+    repositories.xubioClientes.create.mockResolvedValue({
+      status: 'already_exists',
+      created: false,
+      alreadyExistsDetail: 'Ya existe un cliente con ese documento',
+      rawPayload: {},
+    });
+    // Every exact-name lookup misses because Xubio stores the cliente under a
+    // longer name than the order carries — the real TLQV-17518 case was an
+    // order for "Fabiana Cammajo" against a cliente "FABIANA ICELA CAMMAJO".
+    repositories.xubioClientesFinder.findByName.mockResolvedValue({
+      clientes: [],
+      rawPayload: [],
+    });
+    // The listing is minimal — id and name only, like the real endpoint.
+    repositories.xubioClientesFinder.listAll.mockResolvedValue({
+      clientes: [
+        {
+          clienteId: 10406002,
+          nombre: 'TANIA SILVIA CORONEL ALFERRANO DE PEREZ',
+          rawPayload: {},
+        },
+        { clienteId: 10111111, nombre: 'OTRO CLIENTE', rawPayload: {} },
+      ],
+      rawPayload: [],
+    });
+    // Re-reading the single hit by exact name returns the full bean, whose
+    // document is what actually confirms the match.
+    repositories.xubioClientesFinder.findByName.mockImplementation(
+      ({ nombre }: { nombre: string }) =>
+        Promise.resolve(
+          nombre === 'TANIA SILVIA CORONEL ALFERRANO DE PEREZ'
+            ? {
+                clientes: [
+                  {
+                    clienteId: 10406002,
+                    nombre: 'TANIA SILVIA CORONEL ALFERRANO DE PEREZ',
+                    razonSocial: 'TANIA SILVIA CORONEL ALFERRANO DE PEREZ',
+                    cuit: '27-18771957-2',
+                    rawPayload: {},
+                  },
+                ],
+                rawPayload: [],
+              }
+            : { clientes: [], rawPayload: [] },
+        ),
+    );
+    const interactor = createInteractor(repositories);
+
+    const result = await interactor.execute({ tlqvCode: 'TLQV-14921' });
+
+    expect(repositories.xubioClientesFinder.listAll).toHaveBeenCalled();
+    expect(result.status).toBe('already_exists');
+    if (result.status !== 'already_exists') {
+      throw new Error('Expected already_exists response');
+    }
+    expect(result.xubioClienteResult.cliente?.clienteId).toBe(10406002);
+    expect(result.canContinue).toBe(true);
+    expect(repositories.issues.upsert).not.toHaveBeenCalled();
+  });
+
+  it('does not guess when the listing has more than one name match', async () => {
+    const repositories = createRepositories();
+    repositories.xubioClientes.create.mockResolvedValue({
+      status: 'already_exists',
+      created: false,
+      alreadyExistsDetail: 'Ya existe un cliente con ese documento',
+      rawPayload: {},
+    });
+    repositories.xubioClientesFinder.findByName.mockResolvedValue({
+      clientes: [],
+      rawPayload: [],
+    });
+    repositories.xubioClientesFinder.listAll.mockResolvedValue({
+      clientes: [
+        {
+          clienteId: 1,
+          nombre: 'TANIA SILVIA CORONEL ALFERRANO DE PEREZ',
+          rawPayload: {},
+        },
+        {
+          clienteId: 2,
+          nombre: 'TANIA SILVIA CORONEL ALFERRANO DE GOMEZ',
+          rawPayload: {},
+        },
+      ],
+      rawPayload: [],
+    });
+    const interactor = createInteractor(repositories);
+
+    const result = await interactor.execute({ tlqvCode: 'TLQV-14921' });
+
+    expect(result.status).toBe('blocked');
+  });
+
   it('resolves an existing Xubio cliente by CUIT when create reports already_exists', async () => {
     const repositories = createRepositories();
     repositories.xubioClientes.create.mockResolvedValue({
@@ -757,6 +853,7 @@ function createRepositories(): {
   xubioClientes: ICreateXubioClienteRepository & { create: jest.Mock };
   xubioClientesFinder: IFindXubioClienteRepository & {
     findByName: jest.Mock;
+    listAll: jest.Mock;
   };
   issues: IInvoiceClientIssueRepository & { upsert: jest.Mock };
 } {
@@ -817,6 +914,10 @@ function createRepositories(): {
     },
     xubioClientesFinder: {
       findByName: jest.fn().mockResolvedValue({
+        clientes: [],
+        rawPayload: [],
+      }),
+      listAll: jest.fn().mockResolvedValue({
         clientes: [],
         rawPayload: [],
       }),

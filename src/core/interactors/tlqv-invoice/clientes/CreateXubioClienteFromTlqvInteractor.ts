@@ -511,6 +511,67 @@ export class CreateXubioClienteFromTlqvInteractor {
       }
     }
 
+    return await this.findExistingXubioClienteByNameTokens(command);
+  }
+
+  /**
+   * Last resort when no exact-name lookup matched. Xubio only filters by exact
+   * name, so a cliente stored as "FABIANA ICELA CAMMAJO" is unreachable from
+   * an order that carries "Fabiana Cammajo". Here the full listing is scanned
+   * for a cliente whose name contains every token of the one we are looking
+   * for, and only an unambiguous single hit is accepted — with two candidates
+   * it is safer to block than to invoice the wrong person. The hit is then
+   * re-read by exact name and still has to pass the document check, so the
+   * name only narrows the search, it never confirms the match on its own.
+   */
+  private async findExistingXubioClienteByNameTokens(command: {
+    cuitDigits?: string | null;
+    dniDigits?: string | null;
+    buyerName?: string | null;
+    razonSocial?: string | null;
+    allowNameOnlyMatch?: boolean;
+  }): Promise<XubioCliente | undefined> {
+    const repository = this.findXubioClienteRepository;
+    if (repository?.listAll === undefined) {
+      return undefined;
+    }
+
+    const searchNames = [command.buyerName, command.razonSocial]
+      .map((value) => buildNameTokens(value))
+      .filter((tokens) => tokens.length > 0);
+
+    if (searchNames.length === 0) {
+      return undefined;
+    }
+
+    let listing: XubioCliente[];
+    try {
+      listing = (await repository.listAll()).clientes;
+    } catch {
+      return undefined;
+    }
+
+    for (const tokens of searchNames) {
+      const candidates = listing.filter((cliente) =>
+        nameContainsAllTokens(cliente.nombre, tokens),
+      );
+
+      if (candidates.length !== 1) {
+        continue;
+      }
+
+      const detail = await repository.findByName({
+        nombre: candidates[0].nombre,
+      });
+      const match = detail.clientes.find((cliente) =>
+        matchesExistingCliente(cliente, command),
+      );
+
+      if (match !== undefined) {
+        return match;
+      }
+    }
+
     return undefined;
   }
 
@@ -825,6 +886,14 @@ function inferDocumentoTipo(digits: string): TusFacturasDocumentoTipo {
   return prefix >= 30 ? 'CUIL' : 'CUIT';
 }
 
+/**
+ * Note that in practice only the name candidates can hit: Xubio's clienteBean
+ * endpoint filters by exact name, and searching the literal usrCode or CUIT of
+ * an existing cliente returns zero rows on the live account. The document
+ * candidates are kept as cheap defence in case that ever changes; what really
+ * confirms a hit is matchesExistingCliente, and the name-token fallback is
+ * what recovers the clientes stored under a different spelling.
+ */
 function buildClienteSearchCandidates(command: {
   cuitDigits?: string | null;
   dniDigits?: string | null;
@@ -852,6 +921,20 @@ function buildClienteSearchCandidates(command: {
         .filter((value): value is string => value !== null),
     ),
   );
+}
+
+function buildNameTokens(value: string | null | undefined): string[] {
+  return normalizeForComparison(value)
+    .split(' ')
+    .filter((token) => token.length > 1);
+}
+
+function nameContainsAllTokens(
+  nombre: string | null | undefined,
+  tokens: string[],
+): boolean {
+  const clienteTokens = buildNameTokens(nombre);
+  return tokens.every((token) => clienteTokens.includes(token));
 }
 
 function matchesExistingCliente(

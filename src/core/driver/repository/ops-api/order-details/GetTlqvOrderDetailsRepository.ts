@@ -138,15 +138,21 @@ function parseOrderDetailsResponse(
     cuitCompradorDigits: normalizeDigits(buyerCuit),
     cuitEnvio: shippingCuit,
     cuitEnvioDigits: normalizeDigits(shippingCuit),
-    nombreDestinatario: readOptionalString(customer, 'recipientName'),
+    nombreDestinatario: stripFieldLabelPrefix(
+      readOptionalString(customer, 'recipientName'),
+    ),
     telefono:
       readOptionalString(customer, 'canonicalPhone') ??
       readOptionalString(customer, 'phone') ??
       readOptionalString(customer, 'legacyPhone'),
-    direccion: normalizeAddress(readOptionalString(address, 'raw')),
-    ciudad: readOptionalString(address, 'city'),
-    provincia: readOptionalString(address, 'province'),
-    codigoPostal: readOptionalString(address, 'postalCode'),
+    direccion: normalizeAddress(
+      stripFieldLabelPrefix(readOptionalString(address, 'raw')),
+    ),
+    ciudad: stripFieldLabelPrefix(readOptionalString(address, 'city')),
+    provincia: stripFieldLabelPrefix(readOptionalString(address, 'province')),
+    codigoPostal: stripFieldLabelPrefix(
+      readOptionalString(address, 'postalCode'),
+    ),
     email: readOptionalString(customer, 'email'),
   };
 
@@ -322,6 +328,26 @@ function normalizeAddress(value: string | null): string | null {
 
   const normalizedValue = value.replace(/,/g, ' ').replace(/\s+/g, ' ').trim();
   return normalizedValue === '' ? null : normalizedValue;
+}
+
+/**
+ * Some WEB sales reach Ops API with the form label glued to the value —
+ * "nombre : Fabiana Cammajo", "ciudad : City Bell", "Calle : 464 1543". The
+ * label then travels into the Xubio cliente we create and into every lookup
+ * by name, which is why an existing cliente could not be matched. Only a
+ * known set of labels is stripped, so a legitimate value carrying a colon is
+ * left untouched.
+ */
+const FIELD_LABEL_PREFIX =
+  /^\s*(nombre|apellido|calle|direccion|dirección|ciudad|localidad|provincia|telefono|teléfono|email|cp|codigo postal|código postal)\s*:\s*/i;
+
+function stripFieldLabelPrefix(value: string | null): string | null {
+  if (value === null) {
+    return null;
+  }
+
+  const stripped = value.replace(FIELD_LABEL_PREFIX, '').trim();
+  return stripped === '' ? null : stripped;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

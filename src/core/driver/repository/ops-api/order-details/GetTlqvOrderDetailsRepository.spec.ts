@@ -67,6 +67,46 @@ describe('GetOpsApiTlqvOrderDetailsRepository', () => {
     });
   });
 
+  it('strips the form labels some WEB sales glue to the value (TLQV-17518)', async () => {
+    const payload = createOpsApiResponse();
+    payload.sale.customer.recipientName = 'nombre : Fabiana Cammajo';
+    payload.sale.customer.address.raw = 'Calle : 464 1543';
+    payload.sale.customer.address.city = 'ciudad : City Bell';
+    const get = jest.fn().mockResolvedValue({ data: payload });
+    const repository = new GetOpsApiTlqvOrderDetailsRepository({
+      httpClient: { get } as unknown as AxiosInstance,
+    });
+
+    const result = await repository.getByTlqvCode({ tlqvCode: 'TLQV-12903' });
+
+    if (!result.found) {
+      throw new Error('Expected order details to be found');
+    }
+    expect(result.orderDetails.buyerData.nombreDestinatario).toBe(
+      'Fabiana Cammajo',
+    );
+    expect(result.orderDetails.buyerData.direccion).toBe('464 1543');
+    expect(result.orderDetails.buyerData.ciudad).toBe('City Bell');
+  });
+
+  it('leaves a value that legitimately contains a colon untouched', async () => {
+    const payload = createOpsApiResponse();
+    payload.sale.customer.address.raw = 'Ruta 8 Km 60: Lote 4';
+    const get = jest.fn().mockResolvedValue({ data: payload });
+    const repository = new GetOpsApiTlqvOrderDetailsRepository({
+      httpClient: { get } as unknown as AxiosInstance,
+    });
+
+    const result = await repository.getByTlqvCode({ tlqvCode: 'TLQV-12903' });
+
+    if (!result.found) {
+      throw new Error('Expected order details to be found');
+    }
+    expect(result.orderDetails.buyerData.direccion).toBe(
+      'Ruta 8 Km 60: Lote 4',
+    );
+  });
+
   it('returns not found when Ops API returns HTTP 404', async () => {
     const get = jest.fn().mockRejectedValue({
       isAxiosError: true,

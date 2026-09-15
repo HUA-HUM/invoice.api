@@ -97,6 +97,32 @@ export class FindClienteRepository implements IFindXubioClienteRepository {
     }
   }
 
+  async listAll(): Promise<FindXubioClienteResponse> {
+    try {
+      const response = await executeXubioRequestWithRetry(
+        async () =>
+          this.httpClient.get<unknown>(CLIENTE_PATH, {
+            headers: await this.buildAuthorizationHeaders(),
+          }),
+        {
+          ...this.retryOptions,
+          onAuthorizationFailure: this.onAuthorizationFailure,
+        },
+      );
+
+      return {
+        clientes: parseClienteSearchResponse(response.data),
+        rawPayload: response.data,
+      };
+    } catch (error: unknown) {
+      if (error instanceof XubioFindClienteInvalidResponseError) {
+        throw error;
+      }
+
+      throw buildRequestError('(listado completo)', error);
+    }
+  }
+
   private async buildAuthorizationHeaders(): Promise<Record<string, string>> {
     if (this.accessTokenProvider !== undefined) {
       return {
