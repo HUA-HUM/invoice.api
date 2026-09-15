@@ -63,6 +63,25 @@ export class TusFacturasAfipInfoInvalidResponseError extends Error {
   }
 }
 
+/**
+ * ARCA was unreachable, so the fiscal condition is unknown *for now* — as
+ * opposed to a document that is genuinely invalid. TusFacturas reports both
+ * the same way, with HTTP 200 and error "S" in the body, so the transport
+ * retry never sees them and every failure used to end up as invalid_document,
+ * which in turn degraded the cliente to consumidor final and issued a B
+ * invoice to a company. Throwing instead lets the caller surface
+ * FISCAL_INFO_UNAVAILABLE, which the bulk queue already retries — by then
+ * ARCA is usually back.
+ */
+export class TusFacturasAfipInfoUnavailableError extends Error {
+  constructor(documentoNro: string, detail: string) {
+    super(
+      `TusFacturas could not reach ARCA for ${documentoNro}, the fiscal condition is temporarily unknown: ${detail}`,
+    );
+    this.name = TusFacturasAfipInfoUnavailableError.name;
+  }
+}
+
 export class TusFacturasAfipInfoConfigurationError extends Error {
   constructor(field: string) {
     super(`${field} is required to call TusFacturas`);
@@ -130,7 +149,8 @@ export class GetTusFacturasAfipInfoRepository implements IGetTusFacturasAfipInfo
     } catch (error: unknown) {
       if (
         error instanceof TusFacturasAfipInfoInvalidResponseError ||
-        error instanceof TusFacturasAfipInfoConfigurationError
+        error instanceof TusFacturasAfipInfoConfigurationError ||
+        error instanceof TusFacturasAfipInfoUnavailableError
       ) {
         throw error;
       }
@@ -208,6 +228,17 @@ function parseAfipInfoResponse(
   const fiscalInfo = findFiscalInfoSource(value);
 
   if (isInvalidDocumentResponse(value)) {
+    // A temporary ARCA outage must not be mistaken for an invalid document:
+    // the first is retryable, the second is not, and treating them alike is
+    // what produced B invoices for companies.
+    const outageMessage = findServiceOutageMessage(value);
+    if (outageMessage !== undefined) {
+      throw new TusFacturasAfipInfoUnavailableError(
+        documentoNro,
+        outageMessage,
+      );
+    }
+
     if (
       fiscalInfo !== undefined &&
       hasUsableFiscalInfoFromInvalidResponse(fiscalInfo)
@@ -293,6 +324,32 @@ function parseInvalidDocumentResponse(
     messages,
     rawPayload: value,
   };
+}
+
+/**
+ * Phrases TusFacturas uses when ARCA itself is down or not answering, as seen
+ * in production: "Esto podria deberse a un error en el numero o a una caida
+ * temporal de los servicios de ARCA. Error EIP14". Matching is accent- and
+ * case-insensitive. Deliberately narrow — anything not clearly an outage
+ * keeps the old behaviour and is treated as an invalid document, so a genuine
+ * bad CUIT is never retried forever.
+ */
+const SERVICE_OUTAGE_MESSAGE_FRAGMENTS = [
+  'CAIDA TEMPORAL',
+  'EIP14',
+  'SERVICIO NO DISPONIBLE',
+  'NO SE ENCUENTRA DISPONIBLE',
+  'INTENTE NUEVAMENTE MAS TARDE',
+  'TIMEOUT',
+];
+
+function findServiceOutageMessage(value: unknown): string | undefined {
+  return extractErrorMessages(value).find((message) => {
+    const normalized = normalizeForComparison(message);
+    return SERVICE_OUTAGE_MESSAGE_FRAGMENTS.some((fragment) =>
+      normalized.includes(fragment),
+    );
+  });
 }
 
 function isInvalidDocumentResponse(value: unknown): boolean {

@@ -360,6 +360,31 @@ export class CreateXubioClienteFromTlqvInteractor {
       };
     }
 
+    // The lookup before the fiscal call could only search by the name on the
+    // order — the person who receives the parcel. A company is stored in
+    // Xubio under its razón social, so that lookup never found one, and the
+    // recovery that does search by razón social only runs after Xubio reports
+    // a duplicate, which never happens once we send a different document.
+    // Now that the fiscal lookup gave us the razón social, search again
+    // before creating anything.
+    const existingClienteByRazonSocial =
+      await this.findExistingClienteByRazonSocial({
+        cuitDigits: cuitCompradorDigits,
+        razonSocial: fiscalInfo.razonSocial,
+        buyerName: buyerData.nombreDestinatario,
+      });
+
+    if (existingClienteByRazonSocial !== undefined) {
+      return buildExistingClienteResponse({
+        tlqvCode: prepare.tlqvCode,
+        prepare,
+        orderDetails,
+        buyerData,
+        existingCliente: existingClienteByRazonSocial,
+        fallbackDocumentoDigits: cuitCompradorDigits,
+      });
+    }
+
     let xubioClienteResult = await new CreateXubioClienteInteractor(
       this.createXubioClienteRepository,
       this.invoiceClientIssueRepository,
@@ -524,6 +549,36 @@ export class CreateXubioClienteFromTlqvInteractor {
    * re-read by exact name and still has to pass the document check, so the
    * name only narrows the search, it never confirms the match on its own.
    */
+  /**
+   * Looks for an already-registered cliente using the razón social the fiscal
+   * lookup returned, which is how companies are stored in Xubio. Never throws:
+   * this runs on the happy path, so a lookup failure has to fall through to
+   * the normal create rather than block a TLQV that would otherwise invoice.
+   */
+  private async findExistingClienteByRazonSocial(command: {
+    cuitDigits?: string | null;
+    razonSocial?: string | null;
+    buyerName?: string | null;
+  }): Promise<XubioCliente | undefined> {
+    if (
+      this.findXubioClienteRepository === undefined ||
+      normalizeOptionalString(command.razonSocial) === null
+    ) {
+      return undefined;
+    }
+
+    try {
+      return await this.findExistingXubioCliente({
+        cuitDigits: command.cuitDigits,
+        dniDigits: deriveDniDigitsFromDocumento(command.cuitDigits),
+        buyerName: command.buyerName,
+        razonSocial: command.razonSocial,
+      });
+    } catch {
+      return undefined;
+    }
+  }
+
   private async findExistingXubioClienteByNameTokens(command: {
     cuitDigits?: string | null;
     dniDigits?: string | null;
@@ -1017,13 +1072,31 @@ function isInvoiceableEstadoVbi(value: string | null | undefined): boolean {
   );
 }
 
+/**
+ * Derives the DNI hidden inside a CUIT, used to fall back to a consumidor
+ * final cliente when the fiscal lookup comes back empty.
+ *
+ * Legal entities are excluded on purpose. A CUIT starting with 30, 33 or 34
+ * belongs to a company, which has no DNI — slicing one out invented a
+ * document that did not exist, and because it did not collide with the CUIT
+ * the real cliente carried, Xubio never reported a duplicate: it created a
+ * second cliente and issued a B invoice to a company. TLQV-18421 became
+ * "ENSEMBLE" with DNI 71.211.042 alongside the real "ENSEMBLE S. R. L." with
+ * CUIT 30-71211042-9; TLQV-18740 did the same. Returning null keeps those
+ * TLQVs as issues instead — an unissued invoice is retried, a wrong one with
+ * a CAE needs a credit note.
+ */
+const LEGAL_ENTITY_CUIT_PREFIXES = new Set(['30', '33', '34']);
+
 function deriveDniDigitsFromDocumento(
   value: string | null | undefined,
 ): string | null {
   const digits = normalizeDocumentDigits(value);
 
   if (digits.length === 11) {
-    return digits.slice(2, 10);
+    return LEGAL_ENTITY_CUIT_PREFIXES.has(digits.slice(0, 2))
+      ? null
+      : digits.slice(2, 10);
   }
 
   if (

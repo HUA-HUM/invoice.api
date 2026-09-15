@@ -1,6 +1,7 @@
 import type { AxiosInstance } from 'axios';
 import {
   GetTusFacturasAfipInfoRepository,
+  TusFacturasAfipInfoUnavailableError,
   TusFacturasAfipInfoInvalidResponseError,
   TusFacturasAfipInfoRequestError,
 } from './GetTusFacturasAfipInfoRepository';
@@ -159,9 +160,38 @@ describe('GetTusFacturasAfipInfoRepository', () => {
     expect(result.afipInfo.condicionImpositiva).toBe('RESPONSABLE INSCRIPTO');
   });
 
-  it('returns invalid_document when TusFacturas cannot recover AFIP data', async () => {
+  it('throws instead of reporting an invalid document when ARCA is down', async () => {
     const post = jest.fn().mockResolvedValue({
       data: createInvalidDocumentResponse(),
+    });
+    const repository = new GetTusFacturasAfipInfoRepository({
+      userToken: 'user-token',
+      apiKey: 'api-key',
+      apiToken: 'api-token',
+      httpClient: { post } as unknown as AxiosInstance,
+    });
+
+    // "caida temporal de los servicios de ARCA. Error EIP14" is transient.
+    // Reporting it as invalid_document made the caller degrade the cliente to
+    // consumidor final and issue a B invoice to a company; throwing lets the
+    // queue retry once ARCA is back.
+    await expect(
+      repository.getAfipInfo({ documentoNro: '20-11111111-4' }),
+    ).rejects.toBeInstanceOf(TusFacturasAfipInfoUnavailableError);
+  });
+
+  it('still reports invalid_document when the document itself is the problem', async () => {
+    const post = jest.fn().mockResolvedValue({
+      data: {
+        error: 'S',
+        errores: [
+          [
+            'El servicio de consulta de CUIT en AFIP retorna el siguiente error:  VILLA ANA KARINA - La clave  no registra Apellido y/o Nombre informados,Domicilio Incompleto.',
+          ],
+        ],
+        apoc_existe: 'NO',
+        apoc_info: '',
+      },
     });
     const repository = new GetTusFacturasAfipInfoRepository({
       userToken: 'user-token',
@@ -174,16 +204,9 @@ describe('GetTusFacturasAfipInfoRepository', () => {
       documentoNro: '20-11111111-4',
     });
 
+    // Not an outage: retrying forever would not fix it.
     expect(result.status).toBe('invalid_document');
     expect(result.found).toBe(false);
-    if (result.status !== 'invalid_document') {
-      throw new Error('Expected invalid_document response');
-    }
-    expect(result.invalidDocument.documentoNro).toBe('20-11111111-4');
-    expect(result.invalidDocument.documentoTipo).toBe('CUIT');
-    expect(result.invalidDocument.messages).toContain(
-      'No pudimos obtener datos para el CUIT ingresado. Esto podria deberse a un error en el numero o a una caida temporal de los servicios de ARCA. Error EIP14',
-    );
   });
 
   it('uses fiscal info when TusFacturas returns error S but includes usable AFIP data', async () => {

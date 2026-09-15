@@ -327,7 +327,41 @@ describe('CreateXubioClienteFromTlqvInteractor', () => {
     expect(result.status).toBe('blocked');
   });
 
-  it('resolves an existing Xubio cliente by CUIT when create reports already_exists', async () => {
+  it('does not invent a DNI for a company CUIT when the fiscal lookup fails (TLQV-18421)', async () => {
+    const repositories = createRepositories();
+    // ENSEMBLE S. R. L., CUIT 30-71211042-9.
+    repositories.opsOrderDetails.getByTlqvCode.mockResolvedValue({
+      found: true,
+      orderDetails: createOrderDetails({
+        cuitComprador: '30-71211042-9',
+        cuitCompradorDigits: '30712110429',
+      }),
+    });
+    // TusFacturas comes back empty — ARCA down, or incomplete constancia.
+    repositories.tusFacturas.getAfipInfo.mockResolvedValue({
+      found: false,
+      status: 'invalid_document',
+      invalidDocument: {
+        documentoNro: '30-71211042-9',
+        documentoTipo: 'CUIT',
+        documentoNroDigits: '30712110429',
+        message: 'Error EIP14',
+        messages: ['Error EIP14'],
+        rawPayload: {},
+      },
+    });
+    const interactor = createInteractor(repositories);
+
+    const result = await interactor.execute({ tlqvCode: 'TLQV-14921' });
+
+    // Before the fix this created "ENSEMBLE" with DNI 71.211.042 — the middle
+    // digits of the CUIT — and invoiced it as B.
+    expect(repositories.xubioClientes.create).not.toHaveBeenCalled();
+    expect(result.status).toBe('invalid_fiscal_document');
+    expect(result.canContinue).toBe(false);
+  });
+
+  it('resolves an existing Xubio cliente before attempting to create it', async () => {
     const repositories = createRepositories();
     repositories.xubioClientes.create.mockResolvedValue({
       status: 'already_exists',
@@ -387,7 +421,9 @@ describe('CreateXubioClienteFromTlqvInteractor', () => {
     expect(repositories.xubioClientesFinder.findByName).toHaveBeenCalledWith({
       nombre: 'TLQV-27187719572',
     });
-    expect(repositories.xubioClientes.create).toHaveBeenCalled();
+    // Found by razón social before creating anything, so Xubio is never asked
+    // to create a cliente that already exists.
+    expect(repositories.xubioClientes.create).not.toHaveBeenCalled();
     expect(result.xubioClienteResult.cliente?.clienteId).toBe(10256469);
     expect(result.canContinue).toBe(true);
     expect(repositories.issues.upsert).not.toHaveBeenCalled();
