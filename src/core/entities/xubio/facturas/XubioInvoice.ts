@@ -97,6 +97,13 @@ export interface XubioFacturarPayload {
   transaccionProductoItems: XubioFacturarProductItemPayload[];
   transaccionPercepcionItems: XubioFacturarPerceptionPayload[];
   transaccionCobranzaItems: XubioFacturarPaymentPayload[];
+  /** Transacción id of the factura this nota de crédito cancels. */
+  comprobante?: number;
+  /**
+   * Kind of association, not the id of the associated document. Every one of
+   * the 28 notas de crédito already in the account carries exactly 1 here,
+   * with the factura's transacción id in `comprobante`.
+   */
   comprobanteAsociado?: number;
 }
 

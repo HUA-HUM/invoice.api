@@ -49,7 +49,11 @@ describe('CreateInvoiceRepository', () => {
     });
 
     expect(payload.tipo).toBe(3);
-    expect(payload.comprobanteAsociado).toBe(71947390);
+    // The factura's transaccion id goes in `comprobante`; `comprobanteAsociado`
+    // is the kind of association and is always 1 — matching every nota de
+    // credito already issued in the account.
+    expect(payload.comprobante).toBe(71947390);
+    expect(payload.comprobanteAsociado).toBe(1);
   });
 
   it('rejects credit notes without related document', async () => {

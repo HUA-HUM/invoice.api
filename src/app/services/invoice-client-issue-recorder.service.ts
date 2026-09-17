@@ -18,6 +18,14 @@ export interface RecordBlockedInvoiceIssueCommand {
   metadata?: Record<string, unknown>;
 }
 
+export interface RecordBlockedNotaCreditoIssueCommand {
+  tlqvCode: string;
+  blockerCodes: string[];
+  message: string;
+  source: string;
+  metadata?: Record<string, unknown>;
+}
+
 export interface RecordUnhandledInvoiceFailureCommand {
   tlqvCode: string;
   error: unknown;
@@ -87,6 +95,46 @@ export class InvoiceClientIssueRecorderService {
           tlqvCode: command.tlqvCode,
           source: command.source,
           reason,
+          errorMessage: readErrorMessage(error),
+        })}`,
+      );
+    }
+  }
+
+  /**
+   * Persists a nota de crédito that could not be issued. Reuses the
+   * TLQV_INVOICE_FLOW_BLOCKED reason because Madre validates that field
+   * against a closed set; what tells the two apart is metadata.kind, which the
+   * panel can filter on. A dedicated reason would read better and can be added
+   * once Madre accepts one.
+   */
+  async recordNotaCreditoBlocked(
+    command: RecordBlockedNotaCreditoIssueCommand,
+  ): Promise<void> {
+    try {
+      await this.invoiceClientIssueRepository.upsert({
+        tlqvCode: command.tlqvCode,
+        reason: 'TLQV_INVOICE_FLOW_BLOCKED',
+        source: 'invoice_api',
+        message: `Nota de crédito: ${command.message}`,
+        messages: [command.message],
+        rawPayload: {
+          kind: 'nota_credito',
+          blockerCodes: command.blockerCodes,
+        },
+        metadata: {
+          kind: 'nota_credito',
+          source: command.source,
+          blockerCodes: command.blockerCodes,
+          ...command.metadata,
+        },
+        now: new Date(),
+      });
+    } catch (error: unknown) {
+      this.logger.error(
+        `Nota de credito issue registration failed ${JSON.stringify({
+          tlqvCode: command.tlqvCode,
+          source: command.source,
           errorMessage: readErrorMessage(error),
         })}`,
       );

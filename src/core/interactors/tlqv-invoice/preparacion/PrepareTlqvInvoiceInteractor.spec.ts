@@ -35,6 +35,9 @@ describe('PrepareTlqvInvoiceInteractor', () => {
       tlqvCode: 'TLQV-14027',
       exists: true,
     });
+    comprobantesRepository.findFullByTlqvCode.mockResolvedValue({
+      items: [factura(76985617)],
+    });
     const interactor = new PrepareTlqvInvoiceInteractor(comprobantesRepository);
 
     const result = await interactor.execute({ tlqvCode: 'TLQV-14027' });
@@ -79,6 +82,86 @@ describe('PrepareTlqvInvoiceInteractor', () => {
       RangeError,
     );
   });
+  it('lets a TLQV be reissued once its factura was cancelled with a nota de credito', async () => {
+    const comprobantesRepository = createComprobantesRepository();
+    comprobantesRepository.existsByTlqvCode.mockResolvedValue({
+      tlqvCode: 'TLQV-18719',
+      exists: true,
+    });
+    comprobantesRepository.findFullByTlqvCode.mockResolvedValue({
+      items: [factura(76985617), notaCredito(77112121, 76985617)],
+    });
+    const interactor = new PrepareTlqvInvoiceInteractor(comprobantesRepository);
+
+    const result = await interactor.execute({ tlqvCode: 'TLQV-18719' });
+
+    expect(result.isBilled).toBe(false);
+    expect(result.canContinue).toBe(true);
+    expect(result.blockers).toEqual([]);
+  });
+
+  it('keeps blocking while one factura is still live', async () => {
+    const comprobantesRepository = createComprobantesRepository();
+    comprobantesRepository.existsByTlqvCode.mockResolvedValue({
+      tlqvCode: 'TLQV-18719',
+      exists: true,
+    });
+    // The B was cancelled, but the A that replaced it is live.
+    comprobantesRepository.findFullByTlqvCode.mockResolvedValue({
+      items: [
+        factura(76985617),
+        notaCredito(77112121, 76985617),
+        factura(77267759),
+      ],
+    });
+    const interactor = new PrepareTlqvInvoiceInteractor(comprobantesRepository);
+
+    const result = await interactor.execute({ tlqvCode: 'TLQV-18719' });
+
+    expect(result.isBilled).toBe(true);
+    expect(result.canContinue).toBe(false);
+  });
+
+  it('fails closed when a nota de credito does not say what it cancels', async () => {
+    const comprobantesRepository = createComprobantesRepository();
+    comprobantesRepository.existsByTlqvCode.mockResolvedValue({
+      tlqvCode: 'TLQV-18719',
+      exists: true,
+    });
+    comprobantesRepository.findFullByTlqvCode.mockResolvedValue({
+      items: [factura(76985617), notaCredito(77112121, undefined)],
+    });
+    const interactor = new PrepareTlqvInvoiceInteractor(comprobantesRepository);
+
+    const result = await interactor.execute({ tlqvCode: 'TLQV-18719' });
+
+    // Better a manual review than a duplicate invoice with a CAE.
+    expect(result.isBilled).toBe(true);
+  });
+
+  function factura(xubioTransactionId: number) {
+    return {
+      xubioTransactionId,
+      documentKind: 'INVOICE',
+      tipoCodigo: 1,
+      rawDetailPayload: { transaccionid: xubioTransactionId },
+    };
+  }
+
+  function notaCredito(
+    xubioTransactionId: number,
+    cancels: number | undefined,
+  ) {
+    return {
+      xubioTransactionId,
+      documentKind: 'CREDIT_NOTE',
+      tipoCodigo: 3,
+      rawDetailPayload:
+        cancels === undefined
+          ? { transaccionid: xubioTransactionId }
+          : { transaccionid: xubioTransactionId, comprobante: cancels },
+    };
+  }
 });
 
 function createComprobantesRepository(): IMadreXubioComprobantesRepository & {

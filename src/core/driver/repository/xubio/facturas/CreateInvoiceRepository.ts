@@ -26,6 +26,7 @@ const FACTURAR_PATH = '/API/1.1/facturar';
 const DEFAULT_ACCOUNTING_CIRCUIT_ID = -2;
 const DEFAULT_PAYMENT_CONDITION = 1;
 const DEFAULT_EXCHANGE_RATE = 1;
+const RELATED_DOCUMENT_ASSOCIATION_KIND = 1;
 
 export interface CreateInvoiceRepositoryOptions {
   baseUrl?: string;
@@ -165,7 +166,13 @@ export function buildFacturarPayload(
   };
 
   if (invoice.relatedDocument !== undefined) {
-    payload.comprobanteAsociado = invoice.relatedDocument.id;
+    // The factura's transacción id goes in `comprobante`; `comprobanteAsociado`
+    // is the kind of association and is always 1 — that is how all 28 notas de
+    // crédito already in the account look. Putting the id in
+    // `comprobanteAsociado`, as this used to, would leave the nota de crédito
+    // unlinked from the factura it cancels.
+    payload.comprobante = invoice.relatedDocument.id;
+    payload.comprobanteAsociado = RELATED_DOCUMENT_ASSOCIATION_KIND;
   }
 
   return payload;

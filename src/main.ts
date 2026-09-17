@@ -6,6 +6,7 @@ import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app/modules/app.module';
 import { TlqvInvoiceFacturasBulkQueueService } from './app/services/tlqv-invoice-facturas-bulk-queue.service';
+import { TlqvInvoiceNotaCreditoBulkQueueService } from './app/services/tlqv-invoice-nota-credito-bulk-queue.service';
 import { XubioComprobantesBackfillQueueService } from './app/services/xubio-comprobantes-backfill-queue.service';
 
 async function bootstrap() {
@@ -52,6 +53,10 @@ async function bootstrap() {
       )
       .addTag('Tus Facturas', 'Consulta fiscal AFIP/ARCA vía Tus Facturas')
       .addTag('Xubio - Clientes', 'Creación directa de clientes en Xubio')
+      .addTag(
+        'TLQV Invoice - Notas de crédito',
+        'Emisión de notas de crédito que anulan facturas ya emitidas',
+      )
       .build();
     const swaggerDocument = SwaggerModule.createDocument(app, swaggerConfig);
 
@@ -73,12 +78,16 @@ async function bootstrap() {
     const tlqvInvoiceFacturasBulkQueueService = app.get(
       TlqvInvoiceFacturasBulkQueueService,
     );
+    const tlqvInvoiceNotaCreditoBulkQueueService = app.get(
+      TlqvInvoiceNotaCreditoBulkQueueService,
+    );
 
     serverAdapter.setBasePath(basePath);
     createBullBoard({
       queues: [
         new BullMQAdapter(backfillQueueService.getQueue()),
         new BullMQAdapter(tlqvInvoiceFacturasBulkQueueService.getQueue()),
+        new BullMQAdapter(tlqvInvoiceNotaCreditoBulkQueueService.getQueue()),
       ],
       serverAdapter,
     });

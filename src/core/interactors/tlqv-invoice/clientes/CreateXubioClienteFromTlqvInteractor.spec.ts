@@ -526,6 +526,15 @@ describe('CreateXubioClienteFromTlqvInteractor', () => {
       tlqvCode: 'TLQV-14921',
       exists: true,
     });
+    repositories.madre.findFullByTlqvCode.mockResolvedValue({
+      items: [
+        {
+          xubioTransactionId: 76985617,
+          documentKind: 'INVOICE',
+          rawDetailPayload: {},
+        },
+      ],
+    });
     const interactor = createInteractor(repositories);
 
     const result = await interactor.execute({ tlqvCode: 'TLQV-14921' });

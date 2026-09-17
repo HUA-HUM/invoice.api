@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TlqvInvoiceFacturasController } from '../../../controllers/tlqv-invoice-facturas.controller';
 import { InvoiceClientIssueRecorderService } from '../../../services/invoice-client-issue-recorder.service';
 import { TlqvInvoiceFacturasBulkQueueService } from '../../../services/tlqv-invoice-facturas-bulk-queue.service';
+import { TlqvInvoiceNotaCreditoBulkQueueService } from '../../../services/tlqv-invoice-nota-credito-bulk-queue.service';
 import { TlqvInvoiceFacturasService } from '../../../services/tlqv-invoice-facturas.service';
 import { InternalAuthModule } from '../../shared/internal-auth/internal-auth.module';
 import { RedisInfrastructureModule } from '../../shared/redis/redis-infrastructure.module';
@@ -22,7 +23,12 @@ import { tlqvInvoiceFacturasInteractorProviders } from './tlqv-invoice-facturas.
     InvoiceClientIssueRecorderService,
     TlqvInvoiceFacturasService,
     TlqvInvoiceFacturasBulkQueueService,
+    TlqvInvoiceNotaCreditoBulkQueueService,
   ],
-  exports: [TlqvInvoiceFacturasService, TlqvInvoiceFacturasBulkQueueService],
+  exports: [
+    TlqvInvoiceFacturasService,
+    TlqvInvoiceFacturasBulkQueueService,
+    TlqvInvoiceNotaCreditoBulkQueueService,
+  ],
 })
 export class TlqvInvoiceFacturasModule {}

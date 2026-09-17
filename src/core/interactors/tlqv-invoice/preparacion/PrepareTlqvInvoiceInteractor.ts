@@ -80,10 +80,14 @@ export class PrepareTlqvInvoiceInteractor {
           tlqvCode,
         });
 
-      return {
-        status: 'found',
-        exists: response.exists,
-      };
+      if (!response.exists) {
+        return { status: 'found', exists: false };
+      }
+
+      // There are comprobantes, but a factura that was already cancelled with
+      // a nota de crédito must not keep the TLQV blocked — otherwise a wrongly
+      // issued invoice can be voided but never reissued.
+      return await this.checkHasLiveInvoice(tlqvCode);
     } catch (error: unknown) {
       return {
         status: 'unavailable',
@@ -91,6 +95,66 @@ export class PrepareTlqvInvoiceInteractor {
       };
     }
   }
+
+  /**
+   * A factura counts as live until a nota de crédito points at it. Each nota
+   * de crédito carries the transacción id of the factura it cancels in its
+   * payload ("comprobante"), which is how the two are paired here.
+   *
+   * Fails closed on purpose: if the comprobantes cannot be read, or a nota de
+   * crédito does not say which factura it cancels, the TLQV is reported as
+   * billed. Leaving a TLQV blocked costs a manual review; letting one through
+   * costs a duplicate invoice with a CAE.
+   */
+  private async checkHasLiveInvoice(
+    tlqvCode: string,
+  ): Promise<{ status: 'found'; exists: boolean }> {
+    const full = await this.madreXubioComprobantesRepository.findFullByTlqvCode(
+      { tlqvCode },
+    );
+    const items = full.items;
+
+    const facturas = items.filter((item) => !isCreditNote(item));
+    if (facturas.length === 0) {
+      return { status: 'found', exists: false };
+    }
+
+    const creditNotes = items.filter((item) => isCreditNote(item));
+    const cancelledIds = new Set<number>();
+    for (const creditNote of creditNotes) {
+      const cancelledId = readCancelledTransactionId(creditNote);
+      if (cancelledId === null) {
+        // Cannot tell what this nota de crédito cancels — stay blocked.
+        return { status: 'found', exists: true };
+      }
+      cancelledIds.add(cancelledId);
+    }
+
+    return {
+      status: 'found',
+      exists: facturas.some(
+        (factura) => !cancelledIds.has(factura.xubioTransactionId),
+      ),
+    };
+  }
+}
+
+function isCreditNote(item: { documentKind?: string | null }): boolean {
+  return item.documentKind === 'CREDIT_NOTE';
+}
+
+function readCancelledTransactionId(item: {
+  rawDetailPayload?: unknown;
+}): number | null {
+  const payload = item.rawDetailPayload;
+  if (typeof payload !== 'object' || payload === null) {
+    return null;
+  }
+
+  const value = (payload as Record<string, unknown>).comprobante;
+  return typeof value === 'number' && Number.isInteger(value) && value > 0
+    ? value
+    : null;
 }
 
 function buildBlockers(command: {

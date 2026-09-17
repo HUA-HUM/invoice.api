@@ -8,7 +8,9 @@ import {
   CreateTlqvInvoiceFlowInteractor,
   type ICreateXubioClienteFromTlqvUseCase,
 } from '../../../../core/interactors/tlqv-invoice/facturas/CreateTlqvInvoiceFlowInteractor';
+import { CreateNotaCreditoFromTlqvInteractor } from '../../../../core/interactors/tlqv-invoice/facturas/CreateNotaCreditoFromTlqvInteractor';
 import { DeleteXubioInvoiceInteractor } from '../../../../core/interactors/xubio/facturas/DeleteXubioInvoiceInteractor';
+import { createMadreXubioComprobantesRepository } from '../../shared/madre/madre-repositories.factory';
 import {
   readNumberConfig,
   readOptionalConfig,
@@ -24,6 +26,9 @@ export const CREATE_TLQV_INVOICE_FLOW_INTERACTOR = Symbol(
 );
 export const DELETE_XUBIO_INVOICE_INTERACTOR = Symbol(
   'DELETE_XUBIO_INVOICE_INTERACTOR',
+);
+export const CREATE_NOTA_CREDITO_FROM_TLQV_INTERACTOR = Symbol(
+  'CREATE_NOTA_CREDITO_FROM_TLQV_INTERACTOR',
 );
 
 export const tlqvInvoiceFacturasInteractorProviders: Provider[] = [
@@ -82,6 +87,15 @@ export const tlqvInvoiceFacturasInteractorProviders: Provider[] = [
         }),
       );
     },
+  },
+  {
+    provide: CREATE_NOTA_CREDITO_FROM_TLQV_INTERACTOR,
+    inject: [ConfigService],
+    useFactory: (configService: ConfigService) =>
+      new CreateNotaCreditoFromTlqvInteractor(
+        createMadreXubioComprobantesRepository(configService),
+        createXubioCreateInvoiceRepository(configService),
+      ),
   },
   {
     provide: DELETE_XUBIO_INVOICE_INTERACTOR,

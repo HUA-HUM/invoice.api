@@ -4,12 +4,18 @@ import {
   type CreateTlqvInvoiceFlowCommand,
   type CreateTlqvInvoiceFlowResponse,
 } from '../../core/interactors/tlqv-invoice/facturas/CreateTlqvInvoiceFlowInteractor';
+import {
+  CreateNotaCreditoFromTlqvInteractor,
+  type CreateNotaCreditoFromTlqvCommand,
+  type CreateNotaCreditoFromTlqvResponse,
+} from '../../core/interactors/tlqv-invoice/facturas/CreateNotaCreditoFromTlqvInteractor';
 import { DeleteXubioInvoiceInteractor } from '../../core/interactors/xubio/facturas/DeleteXubioInvoiceInteractor';
 import type {
   DeleteXubioInvoiceCommand,
   DeleteXubioInvoiceResponse,
 } from '../../core/entities/xubio/facturas/XubioInvoice';
 import {
+  CREATE_NOTA_CREDITO_FROM_TLQV_INTERACTOR,
   CREATE_TLQV_INVOICE_FLOW_INTERACTOR,
   DELETE_XUBIO_INVOICE_INTERACTOR,
 } from '../modules/tlqv-invoice/facturas/tlqv-invoice-facturas.providers';
@@ -24,6 +30,8 @@ export class TlqvInvoiceFacturasService {
     private readonly createTlqvInvoiceFlowInteractor: CreateTlqvInvoiceFlowInteractor,
     @Inject(DELETE_XUBIO_INVOICE_INTERACTOR)
     private readonly deleteXubioInvoiceInteractor: DeleteXubioInvoiceInteractor,
+    @Inject(CREATE_NOTA_CREDITO_FROM_TLQV_INTERACTOR)
+    private readonly createNotaCreditoFromTlqvInteractor: CreateNotaCreditoFromTlqvInteractor,
     private readonly invoiceClientIssueRecorder: InvoiceClientIssueRecorderService,
   ) {}
 
@@ -62,6 +70,12 @@ export class TlqvInvoiceFacturasService {
 
       throw error;
     }
+  }
+
+  createNotaCreditoFromTlqv(
+    command: CreateNotaCreditoFromTlqvCommand,
+  ): Promise<CreateNotaCreditoFromTlqvResponse> {
+    return this.createNotaCreditoFromTlqvInteractor.execute(command);
   }
 
   deleteByTransaccionId(

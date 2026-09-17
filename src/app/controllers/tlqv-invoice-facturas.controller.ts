@@ -5,6 +5,7 @@ import {
   Delete,
   Get,
   Param,
+  Query,
   Post,
   UseGuards,
 } from '@nestjs/common';
@@ -22,6 +23,7 @@ import {
 import { InternalApiKeyGuard } from '../guards/internal-api-key.guard';
 import { ApiInternalEndpoint } from '../modules/shared/swagger/internal-api-docs.decorators';
 import { TlqvInvoiceFacturasBulkQueueService } from '../services/tlqv-invoice-facturas-bulk-queue.service';
+import { TlqvInvoiceNotaCreditoBulkQueueService } from '../services/tlqv-invoice-nota-credito-bulk-queue.service';
 import { TlqvInvoiceFacturasService } from '../services/tlqv-invoice-facturas.service';
 
 @ApiTags('TLQV Invoice - Facturas')
@@ -31,6 +33,7 @@ export class TlqvInvoiceFacturasController {
   constructor(
     private readonly tlqvInvoiceFacturasService: TlqvInvoiceFacturasService,
     private readonly tlqvInvoiceFacturasBulkQueueService: TlqvInvoiceFacturasBulkQueueService,
+    private readonly tlqvInvoiceNotaCreditoBulkQueueService: TlqvInvoiceNotaCreditoBulkQueueService,
   ) {}
 
   @ApiInternalEndpoint()
@@ -123,6 +126,115 @@ export class TlqvInvoiceFacturasController {
       dryRun: readOptionalBoolean(body.dryRun, 'dryRun'),
       issueDate: readOptionalIssueDate(body.issueDate, body.fechaFactura),
     });
+  }
+
+  @ApiInternalEndpoint()
+  @ApiOperation({
+    summary: 'Emitir nota de crédito que anula la factura vigente de un TLQV',
+    description: [
+      'Lee la factura vigente del TLQV en Madre y emite una nota de crédito',
+      'que la anula, copiando los conceptos tal como se facturaron.',
+      'dryRun=true (por defecto) arma la nota de crédito y la devuelve sin',
+      'emitirla. Si la factura ya tiene una nota de crédito asociada responde',
+      'skipped y no emite otra: una nota de crédito duplicada lleva su propio',
+      'CAE.',
+    ].join(' '),
+  })
+  @ApiBody({
+    required: true,
+    schema: {
+      type: 'object',
+      properties: {
+        tlqvCode: { type: 'string', example: 'TLQV-18997' },
+        dryRun: { type: 'boolean', example: true },
+        issueDate: { type: 'string', example: '2026-09-17' },
+      },
+      required: ['tlqvCode'],
+    },
+  })
+  @Post('nota-credito')
+  createNotaCredito(
+    @Body()
+    body: {
+      tlqvCode?: string;
+      dryRun?: boolean;
+      issueDate?: string;
+    } = {},
+  ) {
+    return this.tlqvInvoiceFacturasService.createNotaCreditoFromTlqv({
+      tlqvCode: readRequiredBodyString(body.tlqvCode, 'tlqvCode'),
+      dryRun: readOptionalBoolean(body.dryRun, 'dryRun'),
+      issueDate: readOptionalIssueDate(body.issueDate, undefined),
+    });
+  }
+
+  @ApiInternalEndpoint()
+  @ApiOperation({
+    summary: 'Emitir notas de crédito en bulk',
+    description: [
+      'Encola una nota de crédito por TLQV. dryRun=true (por defecto) arma',
+      'cada una sin emitirla. Los TLQV cuya factura ya tiene nota de crédito',
+      'se reportan como skipped. El avance se sigue por Bull Board o por',
+      'GET bulk/nota-credito/:batchId.',
+    ].join(' '),
+  })
+  @ApiBody({
+    required: true,
+    schema: {
+      type: 'object',
+      properties: {
+        tlqvCodes: {
+          type: 'array',
+          items: { type: 'string' },
+          example: ['TLQV-18997', 'TLQV-18966'],
+        },
+        dryRun: { type: 'boolean', example: true },
+        issueDate: { type: 'string', example: '2026-09-17' },
+      },
+      required: ['tlqvCodes'],
+    },
+  })
+  @Post('bulk/nota-credito')
+  enqueueNotaCreditoBulk(
+    @Body()
+    body: {
+      tlqvCodes?: unknown;
+      dryRun?: boolean;
+      issueDate?: string;
+    } = {},
+  ) {
+    return this.tlqvInvoiceNotaCreditoBulkQueueService.enqueueBulk({
+      tlqvCodes: readRequiredTlqvCodes(body.tlqvCodes),
+      dryRun: readOptionalBoolean(body.dryRun, 'dryRun'),
+      issueDate: readOptionalIssueDate(body.issueDate, undefined),
+    });
+  }
+
+  @ApiInternalEndpoint()
+  @ApiOperation({
+    summary: 'Últimos batches de notas de crédito',
+    description: [
+      'Resumen de las corridas recientes, para el panel. Lee lo que sigue en',
+      'la cola: el historial permanente de lo emitido está en Madre',
+      '(documentKind=CREDIT_NOTE) y el de lo que falló, en los issues.',
+    ].join(' '),
+  })
+  @Get('bulk/nota-credito')
+  listNotaCreditoBatches(@Query('limit') limit?: string) {
+    return this.tlqvInvoiceNotaCreditoBulkQueueService.listRecentBatches(
+      limit === undefined
+        ? undefined
+        : readRequiredPositiveInteger(limit, 'limit'),
+    );
+  }
+
+  @ApiInternalEndpoint()
+  @ApiOperation({ summary: 'Estado de un batch de notas de crédito' })
+  @Get('bulk/nota-credito/:batchId')
+  getNotaCreditoBatchStatus(@Param('batchId') batchId: string) {
+    return this.tlqvInvoiceNotaCreditoBulkQueueService.getBatchStatus(
+      readRequiredBodyString(batchId, 'batchId'),
+    );
   }
 
   @ApiInternalEndpoint()
