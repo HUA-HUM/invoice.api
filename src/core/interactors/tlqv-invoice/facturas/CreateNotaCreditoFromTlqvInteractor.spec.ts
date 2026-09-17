@@ -105,6 +105,61 @@ describe('CreateNotaCreditoFromTlqvInteractor', () => {
     });
   });
 
+  it('reads the concepts from the raw payload when Madre returns productItems empty (TLQV-18966)', async () => {
+    const madre = createMadre();
+    // Madre parses productItems as [] for comprobantes synced from Xubio; the
+    // concepts only exist in the payload Xubio returned.
+    madre.findFullByTlqvCode.mockResolvedValue({
+      items: [
+        {
+          ...factura(77258774, 'B-00008-00003551'),
+          productItems: [],
+          rawDetailPayload: {
+            transaccionid: 77258774,
+            transaccionProductoItems: [
+              {
+                iva: 0,
+                total: 2956494.32,
+                precio: 2956494.32,
+                importe: 2956494.32,
+                cantidad: 1,
+                deposito: { ID: -2, id: -2, codigo: 'DEPOSITO_UNIVERSAL' },
+                producto: {
+                  ID: 2461025,
+                  id: 2461025,
+                  nombre: 'Pagos por cuenta y orden',
+                },
+                descripcion: 'Pagos por cuenta y orden',
+                montoExento: 0,
+                porcentajeDescuento: 0,
+                precioconivaincluido: 2956494.32,
+              },
+            ],
+          },
+        },
+      ],
+    });
+    const interactor = new CreateNotaCreditoFromTlqvInteractor(madre, {
+      create: jest.fn(),
+    });
+
+    const result = await interactor.execute({ tlqvCode: 'TLQV-18966' });
+
+    expect(result.status).toBe('skipped');
+    expect(result.blockers).toEqual([]);
+    expect(result.notaCredito?.items).toEqual([
+      {
+        productId: 2461025,
+        warehouseId: -2,
+        description: 'Pagos por cuenta y orden',
+        quantity: 1,
+        unitPrice: 2956494.32,
+        priceWithVat: 2956494.32,
+        discountPercentage: 0,
+      },
+    ]);
+  });
+
   it('does not cancel a factura twice', async () => {
     const madre = createMadre();
     madre.findFullByTlqvCode.mockResolvedValue({

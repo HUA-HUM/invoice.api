@@ -221,7 +221,7 @@ function buildNotaCredito(command: {
   issueDate: string;
 }): { notaCredito: XubioInvoice; blocker?: CreateNotaCreditoBlocker } {
   const { factura, issueDate } = command;
-  const productItems = factura.productItems ?? [];
+  const productItems = readProductItems(factura);
 
   if (productItems.length === 0) {
     return {
@@ -277,6 +277,74 @@ function buildNotaCredito(command: {
       relatedDocument: { id: factura.xubioTransactionId },
     },
   };
+}
+
+/**
+ * Madre exposes a parsed `productItems` array, but it comes back empty for
+ * comprobantes synced from Xubio — the concepts only live in the raw payload
+ * Xubio returned. Falls back to that, mapping the Xubio field names
+ * (producto.ID, deposito.ID, precioconivaincluido) onto the parsed shape.
+ */
+function readProductItems(
+  factura: MadreXubioComprobante,
+): MadreXubioProductItem[] {
+  const parsed = factura.productItems ?? [];
+  if (parsed.length > 0) {
+    return parsed;
+  }
+
+  const payload = factura.rawDetailPayload;
+  if (typeof payload !== 'object' || payload === null) {
+    return [];
+  }
+
+  const raw = (payload as Record<string, unknown>).transaccionProductoItems;
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+
+  return raw
+    .filter((item): item is Record<string, unknown> => isRecord(item))
+    .map((item) => ({
+      productoId: readReferenceId(item.producto),
+      productoNombre: readOptionalString(item.producto, 'nombre'),
+      depositoId: readReferenceId(item.deposito),
+      descripcion:
+        typeof item.descripcion === 'string' ? item.descripcion : null,
+      cantidad: readOptionalNumber(item.cantidad),
+      precio: readOptionalNumber(item.precio),
+      importe: readOptionalNumber(item.importe),
+      iva: readOptionalNumber(item.iva),
+      precioConIvaIncluido: readOptionalNumber(item.precioconivaincluido),
+      porcentajeDescuento: readOptionalNumber(item.porcentajeDescuento),
+      rawPayload: item,
+    }));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function readReferenceId(value: unknown): number | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const id = value.ID ?? value.id;
+  return typeof id === 'number' && Number.isFinite(id) ? id : null;
+}
+
+function readOptionalString(value: unknown, key: string): string | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const found = value[key];
+  return typeof found === 'string' ? found : null;
+}
+
+function readOptionalNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
 function toInvoiceItem(item: MadreXubioProductItem): XubioInvoiceItem | null {
