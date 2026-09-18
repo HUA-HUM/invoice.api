@@ -9,6 +9,14 @@ export interface XubioRequestRetryOptions {
   initialDelayInMilliseconds?: number;
   maxDelayInMilliseconds?: number;
   onAuthorizationFailure?: () => void | Promise<void>;
+  /**
+   * A timeout, a dropped connection, a 408 or a 5xx leave the outcome
+   * indeterminate: Xubio may well have processed the request before the answer
+   * got lost. Reads can be repeated safely, so this defaults to true; anything
+   * that writes a fiscal document must set it to false, or one timeout ends up
+   * issuing the same comprobante several times.
+   */
+  retryOnIndeterminateOutcome?: boolean;
 }
 
 export async function executeXubioRequestWithRetry<T>(
@@ -48,14 +56,29 @@ function isRetryableXubioRequestError(
 
   const status = error.response?.status;
   if (status === undefined) {
-    return true;
+    return isIndeterminateOutcomeRetryable(options);
   }
 
   if (isAuthorizationStatus(status)) {
     return options.onAuthorizationFailure !== undefined;
   }
 
-  return status === 408 || status === 429 || status >= 500;
+  // A 429 is the one failure that is certainly not processed: Xubio rejected
+  // the request before doing anything with it.
+  if (status === 429) {
+    return true;
+  }
+
+  return (
+    (status === 408 || status >= 500) &&
+    isIndeterminateOutcomeRetryable(options)
+  );
+}
+
+function isIndeterminateOutcomeRetryable(
+  options: XubioRequestRetryOptions,
+): boolean {
+  return options.retryOnIndeterminateOutcome ?? true;
 }
 
 function isAuthorizationError(error: unknown): boolean {

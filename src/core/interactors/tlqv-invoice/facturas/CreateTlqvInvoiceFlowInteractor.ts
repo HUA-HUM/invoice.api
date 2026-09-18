@@ -742,6 +742,14 @@ function buildXubioInvoiceCreationBlocker(
   const message = getErrorMessage(error);
   const normalizedMessage = normalizeForComparison(message);
 
+  if (hasUnknownXubioOutcome(error)) {
+    return {
+      code: 'XUBIO_INVOICE_OUTCOME_UNKNOWN',
+      message: `Xubio no respondió y no se sabe si llegó a emitir el comprobante. Revisá en Xubio si la factura de este TLQV existe ANTES de volver a facturar: si existe y se reemite, quedan dos facturas con CAE y hay que anular una con nota de crédito. ${message}`,
+      step: 'invoice_creation',
+    };
+  }
+
   if (
     normalizedMessage.includes('FECHA MAYOR A LA FECHA DEL DOCUMENTO') ||
     normalizedMessage.includes('FECHA DEL DOCUMENTO QUE DESEA EMITIR')
@@ -758,6 +766,18 @@ function buildXubioInvoiceCreationBlocker(
     message: `Xubio rechazó la creación de la factura. ${message}`,
     step: 'invoice_creation',
   };
+}
+
+/**
+ * The repository marks the errors where Xubio never told us what happened.
+ * Read as a plain flag so this stays free of the driver layer.
+ */
+function hasUnknownXubioOutcome(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    (error as { outcomeUnknown?: unknown }).outcomeUnknown === true
+  );
 }
 
 function normalizeRequiredTlqvCode(value: string): string {

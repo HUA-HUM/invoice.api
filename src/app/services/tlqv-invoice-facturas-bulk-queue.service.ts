@@ -709,7 +709,10 @@ const RETRYABLE_BLOCKER_CODES = new Set<string>([
   // so retrying is free and recovers the job on its own. Without it a blip
   // blocked the invoice on the first attempt.
   'COSTOS_OPERACIONES_LOOKUP_FAILED',
-  'XUBIO_INVOICE_CREATION_FAILED',
+  // XUBIO_INVOICE_CREATION_FAILED is deliberately absent: the call that failed
+  // is the one that issues the comprobante, and a failure does not prove Xubio
+  // did not create it. Re-running the whole flow could leave two facturas with
+  // CAE for the same TLQV, so these stay blocked for a person to look at.
 ]);
 
 function isLastJobAttempt(

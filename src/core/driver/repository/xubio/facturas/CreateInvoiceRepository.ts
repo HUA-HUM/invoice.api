@@ -39,11 +39,19 @@ export interface CreateInvoiceRepositoryOptions {
 }
 
 export class XubioInvoiceRequestError extends Error {
-  constructor(description: string, detail?: string) {
+  /**
+   * True when Xubio never said what happened — a timeout, a dropped
+   * connection, a 408 or a 5xx. The comprobante may exist anyway, so whoever
+   * reads this has to look in Xubio before reissuing.
+   */
+  readonly outcomeUnknown: boolean;
+
+  constructor(description: string, detail?: string, outcomeUnknown = false) {
     super(
       `Xubio request failed while creating invoice ${description}${detail === undefined ? '' : `: ${detail}`}`,
     );
     this.name = XubioInvoiceRequestError.name;
+    this.outcomeUnknown = outcomeUnknown;
   }
 }
 
@@ -90,6 +98,13 @@ export class CreateInvoiceRepository implements ICreateXubioInvoiceRepository {
         {
           ...this.retryOptions,
           onAuthorizationFailure: this.onAuthorizationFailure,
+          // `facturar` issues a fiscal document and is not idempotent: if the
+          // answer never arrives there is no way to know whether Xubio already
+          // created the comprobante, so repeating the POST risks a duplicate
+          // with its own CAE. Leaving the TLQV unbilled is recoverable; a
+          // duplicate factura needs a nota de crédito. Not configurable on
+          // purpose.
+          retryOnIndeterminateOutcome: false,
         },
       );
 
@@ -402,7 +417,11 @@ function buildRequestError(
         ? error.message
         : `HTTP ${status} - ${serializeResponseBody(body)}`;
 
-    return new XubioInvoiceRequestError(description, detail);
+    return new XubioInvoiceRequestError(
+      description,
+      detail,
+      status === undefined || status === 408 || status >= 500,
+    );
   }
 
   if (error instanceof Error) {

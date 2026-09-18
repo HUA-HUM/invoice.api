@@ -545,6 +545,38 @@ describe('CreateTlqvInvoiceFlowInteractor', () => {
     ]);
   });
 
+  it('does not say Xubio rejected the invoice when Xubio simply never answered', async () => {
+    const dependencies = createDependencies();
+    const timeout = Object.assign(
+      new Error(
+        'Xubio request failed while creating invoice TLQV-1569: timeout of 30000ms exceeded',
+      ),
+      { outcomeUnknown: true },
+    );
+    dependencies.createInvoice.create.mockRejectedValue(timeout);
+    const interactor = createInteractor(dependencies);
+
+    const result = await interactor.execute({
+      tlqvCode: 'TLQV-1569',
+      stopAfter: 'invoice_creation',
+      dryRun: false,
+    });
+
+    expect(result.status).toBe('blocked');
+    if (result.status !== 'blocked') {
+      throw new Error('Expected blocked response');
+    }
+    // The comprobante may exist: whoever picks this up has to look in Xubio
+    // before reissuing, or the TLQV ends up with two facturas with CAE.
+    expect(result.blockers).toEqual([
+      expect.objectContaining({
+        code: 'XUBIO_INVOICE_OUTCOME_UNKNOWN',
+        step: 'invoice_creation',
+      }),
+    ]);
+    expect(result.blockers[0].message).toContain('Revisá en Xubio');
+  });
+
   it('uses today as issue date when no custom issue date is sent', async () => {
     const dependencies = createDependencies();
     const interactor = createInteractor(dependencies);

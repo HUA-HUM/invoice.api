@@ -149,6 +149,31 @@ describe('CreateInvoiceRepository', () => {
       },
     );
   });
+
+  it('does not repeat the POST when Xubio never answers, even with retries configured', async () => {
+    const post = jest.fn().mockRejectedValue({
+      isAxiosError: true,
+      code: 'ECONNABORTED',
+      message: 'timeout of 30000ms exceeded',
+      toJSON: () => ({}),
+    });
+    const repository = new CreateInvoiceRepository({
+      httpClient: { post } as unknown as AxiosInstance,
+      accessTokenProvider: () => Promise.resolve('access-token'),
+      retryOptions: {
+        maxAttempts: 4,
+        initialDelayInMilliseconds: 0,
+        maxDelayInMilliseconds: 0,
+      },
+    });
+
+    await expect(
+      repository.create({ invoice: createInvoice() }),
+    ).rejects.toBeInstanceOf(XubioInvoiceRequestError);
+    // A timeout does not prove the comprobante was not created; a second POST
+    // would risk a duplicate factura with its own CAE.
+    expect(post).toHaveBeenCalledTimes(1);
+  });
 });
 
 function createInvoice(): XubioInvoice {
