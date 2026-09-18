@@ -361,6 +361,42 @@ describe('CreateXubioClienteFromTlqvInteractor', () => {
     expect(result.canContinue).toBe(false);
   });
 
+  it('prefers the cliente holding the full CUIT over the duplicate with the derived DNI', async () => {
+    const repositories = createRepositories();
+    // Two fichas for the same empresa: the real one with the CUIT, and the one
+    // the consumidor final fallback created with the DNI sliced out of it.
+    repositories.xubioClientesFinder.findByName.mockResolvedValue({
+      clientes: [
+        {
+          clienteId: 10459207,
+          nombre: 'Crystal Ice SRL (duplicado - no usar)',
+          cuit: '71.731.090',
+          usrCode: 'TLQV-27187719572',
+          rawPayload: {},
+        },
+        {
+          clienteId: 10158958,
+          nombre: 'CRYSTAL-ICE S. R. L.',
+          cuit: '27-18771957-2',
+          rawPayload: {},
+        },
+      ],
+      rawPayload: [],
+    });
+    const interactor = createInteractor(repositories);
+
+    const result = await interactor.execute({ tlqvCode: 'TLQV-14921' });
+
+    if (
+      result.status === 'blocked' ||
+      result.status === 'invalid_fiscal_document'
+    ) {
+      throw new Error('Expected the existing cliente to be resolved');
+    }
+    // The derived DNI matches too, but only by construction — the CUIT wins.
+    expect(result.xubioClienteResult.cliente?.clienteId).toBe(10158958);
+  });
+
   it('resolves an existing Xubio cliente before attempting to create it', async () => {
     const repositories = createRepositories();
     repositories.xubioClientes.create.mockResolvedValue({

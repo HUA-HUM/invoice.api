@@ -527,9 +527,7 @@ export class CreateXubioClienteFromTlqvInteractor {
       const response = await this.findXubioClienteRepository.findByName({
         nombre,
       });
-      const match = response.clientes.find((cliente) =>
-        matchesExistingCliente(cliente, command),
-      );
+      const match = pickBestMatch(response.clientes, command);
 
       if (match !== undefined) {
         return match;
@@ -618,9 +616,7 @@ export class CreateXubioClienteFromTlqvInteractor {
       const detail = await repository.findByName({
         nombre: candidates[0].nombre,
       });
-      const match = detail.clientes.find((cliente) =>
-        matchesExistingCliente(cliente, command),
-      );
+      const match = pickBestMatch(detail.clientes, command);
 
       if (match !== undefined) {
         return match;
@@ -990,6 +986,47 @@ function nameContainsAllTokens(
 ): boolean {
   const clienteTokens = buildNameTokens(nombre);
   return tokens.every((token) => clienteTokens.includes(token));
+}
+
+/**
+ * Of every cliente that matches, keeps the one holding the full CUIT.
+ *
+ * The consumidor final fallback used to register companies under a DNI sliced
+ * out of their CUIT, so an empresa can appear twice: the real ficha with
+ * 30-71731090-6 and the one the bot created with 71.731.090. Both match — the
+ * second one only because the same digits are derived from the first — and
+ * taking whichever came back first meant invoicing the wrong ficha in letra B.
+ * The full CUIT is the real document; the derived DNI never is.
+ */
+function pickBestMatch(
+  clientes: XubioCliente[],
+  command: {
+    cuitDigits?: string | null;
+    dniDigits?: string | null;
+    buyerName?: string | null;
+    razonSocial?: string | null;
+    allowNameOnlyMatch?: boolean;
+  },
+): XubioCliente | undefined {
+  const matches = clientes.filter((cliente) =>
+    matchesExistingCliente(cliente, command),
+  );
+  if (matches.length <= 1) {
+    return matches[0];
+  }
+
+  const cuitDigits = normalizeOptionalString(command.cuitDigits);
+  if (cuitDigits === null) {
+    return matches[0];
+  }
+
+  const byFullCuit = matches.find(
+    (cliente) =>
+      normalizeDocumentDigits(cliente.cuit) === cuitDigits ||
+      normalizeDocumentDigits(cliente.dni) === cuitDigits,
+  );
+
+  return byFullCuit ?? matches[0];
 }
 
 function matchesExistingCliente(
