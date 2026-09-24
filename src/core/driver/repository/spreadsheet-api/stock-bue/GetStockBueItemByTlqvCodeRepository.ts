@@ -7,6 +7,10 @@ import {
   type StockBueItem,
   type StockBueItemData,
 } from '../../../../entities/spreadsheet-api/stock-bue/StockBueItems';
+import {
+  executeSpreadsheetApiRequestWithRetry,
+  type SpreadsheetApiRequestRetryOptions,
+} from '../SpreadsheetApiRequestRetry';
 
 const DEFAULT_BASE_URL = 'https://spreadsheet.loquieroaca.com';
 const DEFAULT_TIMEOUT_IN_MILLISECONDS = 10_000;
@@ -16,6 +20,7 @@ export interface GetStockBueItemByTlqvCodeRepositoryOptions {
   baseUrl?: string;
   timeoutInMilliseconds?: number;
   httpClient?: AxiosInstance;
+  retryOptions?: SpreadsheetApiRequestRetryOptions;
 }
 
 export class StockBueSpreadsheetApiByTlqvCodeRequestError extends Error {
@@ -38,8 +43,10 @@ export class StockBueSpreadsheetApiByTlqvCodeInvalidResponseError extends Error 
 
 export class GetStockBueItemByTlqvCodeRepository implements IGetStockBueItemByTlqvCodeRepository {
   private readonly httpClient: AxiosInstance;
+  private readonly retryOptions: SpreadsheetApiRequestRetryOptions;
 
   constructor(options: GetStockBueItemByTlqvCodeRepositoryOptions = {}) {
+    this.retryOptions = options.retryOptions ?? {};
     this.httpClient =
       options.httpClient ??
       axios.create({
@@ -55,8 +62,12 @@ export class GetStockBueItemByTlqvCodeRepository implements IGetStockBueItemByTl
     const tlqvCode = normalizeRequiredTlqvCode(command.tlqvCode);
 
     try {
-      const response = await this.httpClient.get<unknown>(
-        `/sheet/${STOCK_BUE_SHEET_SLUG}/${encodeURIComponent(tlqvCode)}`,
+      const response = await executeSpreadsheetApiRequestWithRetry(
+        () =>
+          this.httpClient.get<unknown>(
+            `/sheet/${STOCK_BUE_SHEET_SLUG}/${encodeURIComponent(tlqvCode)}`,
+          ),
+        this.retryOptions,
       );
       const item = parseResponse(response.data, tlqvCode);
 

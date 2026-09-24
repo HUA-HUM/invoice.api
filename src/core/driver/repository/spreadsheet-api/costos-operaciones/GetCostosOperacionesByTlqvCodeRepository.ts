@@ -7,6 +7,10 @@ import {
   type GetCostosOperacionesByTlqvCodeCommand,
   type GetCostosOperacionesByTlqvCodeResponse,
 } from '../../../../entities/spreadsheet-api/costos-operaciones/CostosOperaciones';
+import {
+  executeSpreadsheetApiRequestWithRetry,
+  type SpreadsheetApiRequestRetryOptions,
+} from '../SpreadsheetApiRequestRetry';
 
 const DEFAULT_BASE_URL = 'https://spreadsheet.loquieroaca.com';
 const DEFAULT_TIMEOUT_IN_MILLISECONDS = 10_000;
@@ -16,6 +20,7 @@ export interface GetCostosOperacionesByTlqvCodeRepositoryOptions {
   baseUrl?: string;
   timeoutInMilliseconds?: number;
   httpClient?: AxiosInstance;
+  retryOptions?: SpreadsheetApiRequestRetryOptions;
 }
 
 export class CostosOperacionesSpreadsheetApiByTlqvCodeRequestError extends Error {
@@ -39,8 +44,10 @@ export class CostosOperacionesSpreadsheetApiByTlqvCodeInvalidResponseError exten
 
 export class GetCostosOperacionesByTlqvCodeRepository implements IGetCostosOperacionesByTlqvCodeRepository {
   private readonly httpClient: AxiosInstance;
+  private readonly retryOptions: SpreadsheetApiRequestRetryOptions;
 
   constructor(options: GetCostosOperacionesByTlqvCodeRepositoryOptions = {}) {
+    this.retryOptions = options.retryOptions ?? {};
     this.httpClient =
       options.httpClient ??
       axios.create({
@@ -56,8 +63,12 @@ export class GetCostosOperacionesByTlqvCodeRepository implements IGetCostosOpera
     const tlqvCode = normalizeRequiredTlqvCode(command.tlqvCode);
 
     try {
-      const response = await this.httpClient.get<unknown>(
-        `/sheet/${COSTOS_OPERACIONES_SHEET_SLUG}/${encodeURIComponent(tlqvCode)}`,
+      const response = await executeSpreadsheetApiRequestWithRetry(
+        () =>
+          this.httpClient.get<unknown>(
+            `/sheet/${COSTOS_OPERACIONES_SHEET_SLUG}/${encodeURIComponent(tlqvCode)}`,
+          ),
+        this.retryOptions,
       );
       const item = parseResponse(response.data, tlqvCode);
 

@@ -67,14 +67,11 @@ describe('GetCostosOperacionesByTlqvCodeRepository', () => {
     });
   });
 
-  it('wraps request failures with context', async () => {
-    const get = jest.fn().mockRejectedValue({
-      isAxiosError: true,
-      code: 'ECONNABORTED',
-      message: 'timeout of 10000ms exceeded',
-    });
+  it('wraps request failures with context once the retries are spent', async () => {
+    const get = jest.fn().mockRejectedValue(createTimeoutError());
     const repository = new GetCostosOperacionesByTlqvCodeRepository({
       httpClient: { get } as never,
+      retryOptions: NO_DELAY_RETRY,
     });
 
     await expect(
@@ -85,6 +82,47 @@ describe('GetCostosOperacionesByTlqvCodeRepository', () => {
         'ECONNABORTED - timeout of 10000ms exceeded',
       ),
     );
+    expect(get).toHaveBeenCalledTimes(3);
+  });
+
+  it('recovers from a timeout on its own, so a single TLQV can be invoiced (TLQV-19368)', async () => {
+    // The sheet read timed out once and blocked the whole invoice, because a
+    // single run has no second chance the way the bulk queue does.
+    const get = jest
+      .fn()
+      .mockRejectedValueOnce(createTimeoutError())
+      .mockResolvedValueOnce({
+        data: {
+          rowNumber: 17648,
+          data: { OPERACIÓN: 'TLQV-19368', 'Precio de venta': '$902,999.00' },
+        },
+      });
+    const repository = new GetCostosOperacionesByTlqvCodeRepository({
+      httpClient: { get } as never,
+      retryOptions: NO_DELAY_RETRY,
+    });
+
+    const result = await repository.getByTlqvCode({ tlqvCode: 'TLQV-19368' });
+
+    expect(result.found).toBe(true);
+    expect(get).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not retry a 404, which simply means the row is not in the sheet', async () => {
+    const get = jest.fn().mockRejectedValue({
+      isAxiosError: true,
+      message: 'Request failed with status code 404',
+      response: { status: 404, data: { message: 'not found' } },
+    });
+    const repository = new GetCostosOperacionesByTlqvCodeRepository({
+      httpClient: { get } as never,
+      retryOptions: NO_DELAY_RETRY,
+    });
+
+    const result = await repository.getByTlqvCode({ tlqvCode: 'TLQV-17767' });
+
+    expect(result.found).toBe(false);
+    expect(get).toHaveBeenCalledTimes(1);
   });
 
   it('rejects a response for another TLQV', async () => {
@@ -103,3 +141,17 @@ describe('GetCostosOperacionesByTlqvCodeRepository', () => {
     ).rejects.toThrow('expected TLQV TLQV-17767, received TLQV-9999');
   });
 });
+
+const NO_DELAY_RETRY = {
+  maxAttempts: 3,
+  initialDelayInMilliseconds: 0,
+  maxDelayInMilliseconds: 0,
+};
+
+function createTimeoutError() {
+  return {
+    isAxiosError: true,
+    code: 'ECONNABORTED',
+    message: 'timeout of 10000ms exceeded',
+  };
+}

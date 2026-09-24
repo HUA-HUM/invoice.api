@@ -60,7 +60,7 @@ describe('GetStockBueItemByTlqvCodeRepository', () => {
     });
   });
 
-  it('wraps request failures with context', async () => {
+  it('wraps request failures with context once the retries are spent', async () => {
     const get = jest.fn().mockRejectedValue({
       isAxiosError: true,
       code: 'ECONNABORTED',
@@ -68,6 +68,11 @@ describe('GetStockBueItemByTlqvCodeRepository', () => {
     });
     const repository = new GetStockBueItemByTlqvCodeRepository({
       httpClient: { get } as never,
+      retryOptions: {
+        maxAttempts: 3,
+        initialDelayInMilliseconds: 0,
+        maxDelayInMilliseconds: 0,
+      },
     });
 
     await expect(

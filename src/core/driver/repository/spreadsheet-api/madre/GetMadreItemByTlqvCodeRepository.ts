@@ -8,6 +8,10 @@ import {
   type MadreItemData,
   type MadreSpreadsheetCellValue,
 } from '../../../../entities/spreadsheet-api/madre/MadreItems';
+import {
+  executeSpreadsheetApiRequestWithRetry,
+  type SpreadsheetApiRequestRetryOptions,
+} from '../SpreadsheetApiRequestRetry';
 
 const DEFAULT_BASE_URL = 'https://spreadsheet.loquieroaca.com';
 const DEFAULT_SPREADSHEET_NAME = 'prueba-lectura';
@@ -19,6 +23,7 @@ export interface GetMadreItemByTlqvCodeRepositoryOptions {
   spreadsheetName?: string;
   timeoutInMilliseconds?: number;
   httpClient?: AxiosInstance;
+  retryOptions?: SpreadsheetApiRequestRetryOptions;
 }
 
 export class SpreadsheetApiMadreByTlqvRequestError extends Error {
@@ -39,9 +44,11 @@ export class SpreadsheetApiMadreByTlqvInvalidResponseError extends Error {
 
 export class GetMadreItemByTlqvCodeRepository implements IGetMadreItemByTlqvCodeRepository {
   private readonly httpClient: AxiosInstance;
+  private readonly retryOptions: SpreadsheetApiRequestRetryOptions;
   private readonly spreadsheetName: string;
 
   constructor(options: GetMadreItemByTlqvCodeRepositoryOptions = {}) {
+    this.retryOptions = options.retryOptions ?? {};
     this.spreadsheetName = options.spreadsheetName ?? DEFAULT_SPREADSHEET_NAME;
     this.httpClient =
       options.httpClient ??
@@ -58,8 +65,12 @@ export class GetMadreItemByTlqvCodeRepository implements IGetMadreItemByTlqvCode
     const tlqvCode = normalizeRequiredTlqvCode(command.tlqvCode);
 
     try {
-      const response = await this.httpClient.get<unknown>(
-        `/sheet/${encodeURIComponent(this.spreadsheetName)}/${MADRE_SHEET_NAME}/${encodeURIComponent(tlqvCode)}`,
+      const response = await executeSpreadsheetApiRequestWithRetry(
+        () =>
+          this.httpClient.get<unknown>(
+            `/sheet/${encodeURIComponent(this.spreadsheetName)}/${MADRE_SHEET_NAME}/${encodeURIComponent(tlqvCode)}`,
+          ),
+        this.retryOptions,
       );
       const item = parseResponse(response.data, tlqvCode);
 

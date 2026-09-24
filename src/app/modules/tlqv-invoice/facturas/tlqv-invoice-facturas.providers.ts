@@ -39,6 +39,22 @@ export const tlqvInvoiceFacturasInteractorProviders: Provider[] = [
       createXubioClienteFromTlqvUseCase: ICreateXubioClienteFromTlqvUseCase,
       configService: ConfigService,
     ) => {
+      // The Spreadsheet API reads a live Google Sheet and times out every so
+      // often. Each call is a plain read of one row, so retrying costs nothing
+      // and it is what lets a single TLQV be invoiced from the panel: before
+      // this, only the bulk queue recovered, by retrying the whole job.
+      const spreadsheetRetryOptions = {
+        maxAttempts: readNumberConfig(
+          configService,
+          'SPREADSHEET_API_RETRY_ATTEMPTS',
+          3,
+        ),
+        initialDelayInMilliseconds: readNumberConfig(
+          configService,
+          'SPREADSHEET_API_RETRY_INITIAL_DELAY_MS',
+          500,
+        ),
+      };
       const spreadsheetOptions = {
         baseUrl: readOptionalConfig(configService, 'SPREADSHEET_API_BASE_URL'),
         spreadsheetName: readOptionalConfig(
@@ -50,6 +66,7 @@ export const tlqvInvoiceFacturasInteractorProviders: Provider[] = [
           'SPREADSHEET_API_TIMEOUT_MS',
           10_000,
         ),
+        retryOptions: spreadsheetRetryOptions,
       };
 
       return new CreateTlqvInvoiceFlowInteractor(
@@ -73,6 +90,7 @@ export const tlqvInvoiceFacturasInteractorProviders: Provider[] = [
             'SPREADSHEET_API_TIMEOUT_MS',
             10_000,
           ),
+          retryOptions: spreadsheetRetryOptions,
         }),
         new GetCostosOperacionesByTlqvCodeRepository({
           baseUrl: readOptionalConfig(
@@ -84,6 +102,7 @@ export const tlqvInvoiceFacturasInteractorProviders: Provider[] = [
             'SPREADSHEET_API_TIMEOUT_MS',
             10_000,
           ),
+          retryOptions: spreadsheetRetryOptions,
         }),
       );
     },
