@@ -13,6 +13,14 @@ const DEFAULT_RETRY_ATTEMPTS = 2;
 const DEFAULT_RETRY_DELAY_IN_MILLISECONDS = 250;
 const AFIP_INFO_PATH = '/app/api/v2/clientes/afip-info';
 const DOCUMENTO_DIGITS_LENGTH = 11;
+/**
+ * The afip-info endpoint answers only to CUIT. This used to be CUIL for
+ * prefixes 30 and up — exactly the legal entities — and checked against real
+ * cases every 11-digit document resolves as CUIT and fails as CUIL. The miss
+ * comes back with a message blaming a possible ARCA outage, which is why it
+ * read as a service problem rather than a wrong document type.
+ */
+const DEFAULT_DOCUMENTO_TIPO: TusFacturasDocumentoTipo = 'CUIT';
 const RETRYABLE_STATUS_CODES = new Set([408, 429, 500, 502, 503, 504]);
 
 const FISCAL_INFO_FIELDS = [
@@ -120,9 +128,7 @@ export class GetTusFacturasAfipInfoRepository implements IGetTusFacturasAfipInfo
     command: GetTusFacturasAfipInfoCommand,
   ): Promise<GetTusFacturasAfipInfoResponse> {
     const documentoNroDigits = extractDocumentoNroDigits(command.documentoNro);
-    const documentoTipo =
-      command.documentoTipo ??
-      inferDocumentoTipoFromDocumentoNroDigits(documentoNroDigits);
+    const documentoTipo = command.documentoTipo ?? DEFAULT_DOCUMENTO_TIPO;
 
     if (documentoNroDigits.length !== DOCUMENTO_DIGITS_LENGTH) {
       return buildInvalidDocumentoLengthResponse(
@@ -551,13 +557,6 @@ function buildInvalidDocumentoLengthResponse(
 
 function formatDocumentoNro(digits: string): string {
   return `${digits.slice(0, 2)}-${digits.slice(2, 10)}-${digits.slice(10)}`;
-}
-
-function inferDocumentoTipoFromDocumentoNroDigits(
-  digits: string,
-): TusFacturasDocumentoTipo {
-  const prefix = Number(digits.slice(0, 2));
-  return prefix >= 30 ? 'CUIL' : 'CUIT';
 }
 
 function readRequiredCredential(

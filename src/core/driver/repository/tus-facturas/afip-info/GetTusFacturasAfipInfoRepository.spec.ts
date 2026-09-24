@@ -54,7 +54,7 @@ describe('GetTusFacturasAfipInfoRepository', () => {
     expect(result.afipInfo.estado).toBe('ACTIVO');
   });
 
-  it('infers CUIL for prefixes greater than or equal to 30 and can send cookie', async () => {
+  it('asks for a company CUIT as CUIT, not CUIL, and can send cookie', async () => {
     const post = jest.fn().mockResolvedValue({
       data: { data: createDirectAfipInfoResponse() },
     });
@@ -75,7 +75,10 @@ describe('GetTusFacturasAfipInfoRepository', () => {
       expect.objectContaining({
         cliente: {
           documento_nro: '30-12345678-9',
-          documento_tipo: 'CUIL',
+          // A 30-prefix document belongs to a company and is a CUIT. Asking
+          // for it as CUIL returns nothing, with a message blaming a possible
+          // ARCA outage — which is how it went unnoticed.
+          documento_tipo: 'CUIT',
         },
       }),
       {
@@ -89,7 +92,7 @@ describe('GetTusFacturasAfipInfoRepository', () => {
     if (result.status !== 'found') {
       throw new Error('Expected found response');
     }
-    expect(result.afipInfo.documentoTipo).toBe('CUIL');
+    expect(result.afipInfo.documentoTipo).toBe('CUIT');
   });
 
   it('allows overriding documentoTipo', async () => {

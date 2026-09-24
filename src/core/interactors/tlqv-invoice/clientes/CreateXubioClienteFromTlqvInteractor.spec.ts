@@ -327,6 +327,76 @@ describe('CreateXubioClienteFromTlqvInteractor', () => {
     expect(result.status).toBe('blocked');
   });
 
+  it('looks a company CUIT up as CUIT and files it in Xubio as CUIT (TLQV-19277)', async () => {
+    const repositories = createRepositories();
+    // ONE PACK S.A., CUIT 33-71654296-9.
+    repositories.opsOrderDetails.getByTlqvCode.mockResolvedValue({
+      found: true,
+      orderDetails: createOrderDetails({
+        cuitComprador: '33-71654296-9',
+        cuitCompradorDigits: '33716542969',
+      }),
+    });
+    repositories.tusFacturas.getAfipInfo.mockResolvedValue({
+      found: true,
+      status: 'found',
+      afipInfo: {
+        documentoNro: '33-71654296-9',
+        documentoNroDigits: '33716542969',
+        documentoTipo: 'CUIT',
+        razonSocial: 'ONE PACK S.A.',
+        condicionImpositiva: 'RESPONSABLE INSCRIPTO',
+        direccion: 'Conesa 2553',
+        codigoPostal: '1428',
+        provincia: 'Capital Federal',
+        rawPayload: {},
+      },
+    });
+    const interactor = createInteractor(repositories);
+
+    await interactor.execute({ tlqvCode: 'TLQV-19277' });
+
+    // This used to send CUIL for every 30/33/34 prefix. TusFacturas answers
+    // nothing at all for a CUIL, and it reports that miss with a message that
+    // blames a possible ARCA outage, so every company looked like a service
+    // problem; the clientes that did get through carried CUIL as their
+    // identificacion tributaria instead of their CUIT.
+    expect(repositories.tusFacturas.getAfipInfo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        documentoNro: '33716542969',
+        documentoTipo: 'CUIT',
+      }),
+    );
+    expect(repositories.xubioClientes.create).toHaveBeenCalledWith({
+      cliente: {
+        nombre: 'Tania Silvia Coronel Alferrano',
+        razonSocial: 'ONE PACK S.A.',
+        primerNombre: 'Tania',
+        primerApellido: 'Silvia Coronel Alferrano',
+        identificacionTributaria: {
+          codigo: 'CUIT',
+        },
+        categoriaFiscal: {
+          codigo: 'RI',
+        },
+        pais: {
+          codigo: 'ARGENTINA',
+        },
+        cuit: '33-71654296-9',
+        CUIT: '33-71654296-9',
+        direccion: 'Belgrano 53',
+        codigoPostal: '5000',
+        provincia: {
+          nombre: 'CORDOBA',
+        },
+        usrCode: 'TLQV-33716542969',
+        descripcion: 'Cliente creado automáticamente desde TLQV',
+        esclienteextranjero: 0,
+        esProveedor: 0,
+      },
+    });
+  });
+
   it('does not invent a DNI for a company CUIT when the fiscal lookup fails (TLQV-18421)', async () => {
     const repositories = createRepositories();
     // ENSEMBLE S. R. L., CUIT 30-71211042-9.

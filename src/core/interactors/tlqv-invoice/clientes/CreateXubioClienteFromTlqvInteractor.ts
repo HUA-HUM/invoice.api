@@ -223,7 +223,7 @@ export class CreateXubioClienteFromTlqvInteractor {
       };
     }
 
-    const documentoTipo = inferDocumentoTipo(cuitCompradorDigits);
+    const documentoTipo = FISCAL_DOCUMENTO_TIPO;
     const issueContext = {
       saleNumber: orderDetails.saleNumber,
       buyerName: buyerData.nombreDestinatario,
@@ -853,8 +853,7 @@ function buildFiscalInfoFromExistingCliente(
     normalizeOptionalString(fallbackDocumentoDigits) ??
     '';
   const documentoNroDigits = normalizeDocumentDigits(rawDocumento);
-  const documentoTipo =
-    inferDocumentoTipoFromOptionalDigits(documentoNroDigits);
+  const documentoTipo = FISCAL_DOCUMENTO_TIPO;
 
   return {
     documentoNro: rawDocumento,
@@ -930,11 +929,6 @@ function buildFiscalInfoBlockers(
   }
 
   return blockers;
-}
-
-function inferDocumentoTipo(digits: string): TusFacturasDocumentoTipo {
-  const prefix = Number(digits.slice(0, 2));
-  return prefix >= 30 ? 'CUIL' : 'CUIT';
 }
 
 /**
@@ -1123,6 +1117,18 @@ function isInvoiceableEstadoVbi(value: string | null | undefined): boolean {
  * TLQVs as issues instead — an unissued invoice is retried, a wrong one with
  * a CAE needs a credit note.
  */
+/**
+ * Decides two things at once: how the buyer is looked up in TusFacturas and
+ * the identificacion tributaria the cliente is created with in Xubio. It used
+ * to be CUIL for prefixes 30 and up — the legal entities — which broke both.
+ * TusFacturas answers nothing at all for a CUIL, and it reports that miss with
+ * a message blaming a possible ARCA outage, so every company read as a service
+ * problem; the clientes that did get created carried CUIL instead of their
+ * CUIT. A CUIL belongs to a natural person and never to a company, and even
+ * for a person the fiscal lookup only answers to their CUIT.
+ */
+const FISCAL_DOCUMENTO_TIPO: TusFacturasDocumentoTipo = 'CUIT';
+
 const LEGAL_ENTITY_CUIT_PREFIXES = new Set(['30', '33', '34']);
 
 function deriveDniDigitsFromDocumento(
@@ -1245,12 +1251,6 @@ function splitName(value: string): {
     primerNombre: parts[0],
     primerApellido: parts.slice(1).join(' '),
   };
-}
-
-function inferDocumentoTipoFromOptionalDigits(
-  digits: string,
-): TusFacturasDocumentoTipo {
-  return digits.length === 11 ? inferDocumentoTipo(digits) : 'CUIT';
 }
 
 function normalizeForComparison(value: string | null | undefined): string {
