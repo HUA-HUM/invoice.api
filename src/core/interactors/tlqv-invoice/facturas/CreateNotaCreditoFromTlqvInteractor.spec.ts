@@ -160,6 +160,66 @@ describe('CreateNotaCreditoFromTlqvInteractor', () => {
     ]);
   });
 
+  it('names the concepts from the product when Xubio returns descripcion empty (TLQV-19989)', async () => {
+    const madre = createMadre();
+    // This is how Xubio returns the concepts of a factura issued through the
+    // API: descripcion is the empty string, the name only in producto.nombre.
+    madre.findFullByTlqvCode.mockResolvedValue({
+      items: [
+        {
+          ...factura(77777299, 'B-00008-00003981'),
+          productItems: [],
+          rawDetailPayload: {
+            transaccionid: 77777299,
+            transaccionProductoItems: [
+              {
+                total: 210498.55,
+                precio: 210498.55,
+                cantidad: 1,
+                deposito: { ID: -2, id: -2 },
+                producto: {
+                  ID: 2461025,
+                  id: 2461025,
+                  nombre: 'Pagos por cuenta y orden',
+                },
+                descripcion: '',
+                porcentajeDescuento: 0,
+                precioconivaincluido: 210498.55,
+              },
+              {
+                total: 59477.4,
+                precio: 59477.4,
+                cantidad: 1,
+                deposito: { ID: -2, id: -2 },
+                producto: {
+                  ID: 2461058,
+                  id: 2461058,
+                  // Xubio stores some of these names with a trailing space.
+                  nombre: 'Derechos de importacion pagados por cuenta y orden ',
+                },
+                descripcion: '',
+                porcentajeDescuento: 0,
+                precioconivaincluido: 59477.4,
+              },
+            ],
+          },
+        },
+      ],
+    });
+    const interactor = new CreateNotaCreditoFromTlqvInteractor(madre, {
+      create: jest.fn(),
+    });
+
+    const result = await interactor.execute({ tlqvCode: 'TLQV-19989' });
+
+    // An empty description makes Xubio refuse the whole nota de crédito, and
+    // `??` did not catch it because an empty string is not null.
+    expect(result.notaCredito?.items.map((item) => item.description)).toEqual([
+      'Pagos por cuenta y orden',
+      'Derechos de importacion pagados por cuenta y orden',
+    ]);
+  });
+
   it('does not cancel a factura twice', async () => {
     const madre = createMadre();
     madre.findFullByTlqvCode.mockResolvedValue({

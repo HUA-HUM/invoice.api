@@ -362,12 +362,32 @@ function toInvoiceItem(item: MadreXubioProductItem): XubioInvoiceItem | null {
   return {
     productId: item.productoId,
     warehouseId: item.depositoId,
-    description: item.descripcion ?? item.productoNombre ?? '',
+    description: readItemDescription(item),
     quantity: item.cantidad ?? 1,
     unitPrice: item.precio,
     priceWithVat: item.precioConIvaIncluido ?? 0,
     discountPercentage: item.porcentajeDescuento ?? 0,
   };
+}
+
+/**
+ * Xubio refuses an item with an empty description, and that is exactly how it
+ * returns the concepts of a factura issued through the API: `descripcion` is
+ * the empty string and the name only lives in `producto.nombre`. Falling back
+ * with `??` was not enough — an empty string is not null — so every nota de
+ * crédito for those facturas died on "items[0].description cannot be empty"
+ * before reaching Xubio.
+ */
+function readItemDescription(item: MadreXubioProductItem): string {
+  const candidates = [item.descripcion, item.productoNombre];
+  for (const candidate of candidates) {
+    const trimmed = (candidate ?? '').trim();
+    if (trimmed !== '') {
+      return trimmed;
+    }
+  }
+
+  return 'Concepto facturado';
 }
 
 function normalizeLetter(value: string | null | undefined): 'A' | 'B' {
